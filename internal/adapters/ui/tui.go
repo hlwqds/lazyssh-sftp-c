@@ -32,8 +32,8 @@ type tui struct {
 	version string
 	commit  string
 
-	app           *tview.Application
-	serverService ports.ServerService
+	app             *tview.Application
+	serverService   ports.ServerService
 	fileService     ports.FileService
 	sftpService     ports.SFTPService
 	transferService ports.TransferService

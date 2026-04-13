@@ -36,10 +36,10 @@ func newTestLogger() *zap.SugaredLogger {
 func TestListDir_FiltersHiddenFiles(t *testing.T) {
 	dir := t.TempDir()
 	// Create visible and hidden files
-	os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("a"), 0644)
-	os.WriteFile(filepath.Join(dir, ".hidden"), []byte("b"), 0644)
-	os.WriteFile(filepath.Join(dir, "normal.go"), []byte("c"), 0644)
-	os.Mkdir(filepath.Join(dir, ".secret_dir"), 0755)
+	os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".hidden"), []byte("b"), 0o644)
+	os.WriteFile(filepath.Join(dir, "normal.go"), []byte("c"), 0o644)
+	os.Mkdir(filepath.Join(dir, ".secret_dir"), 0o755)
 
 	fs := New(newTestLogger())
 
@@ -74,10 +74,10 @@ func TestListDir_FiltersHiddenFiles(t *testing.T) {
 // TestListDir_DirectoriesBeforeFiles verifies directories are listed before files.
 func TestListDir_DirectoriesBeforeFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.Mkdir(filepath.Join(dir, "subdir"), 0755)
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("a"), 0644)
-	os.Mkdir(filepath.Join(dir, "another_dir"), 0755)
-	os.WriteFile(filepath.Join(dir, "another_file.go"), []byte("b"), 0644)
+	os.Mkdir(filepath.Join(dir, "subdir"), 0o755)
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("a"), 0o644)
+	os.Mkdir(filepath.Join(dir, "another_dir"), 0o755)
+	os.WriteFile(filepath.Join(dir, "another_file.go"), []byte("b"), 0o644)
 
 	fs := New(newTestLogger())
 	entries, err := fs.ListDir(dir, false, domain.SortByName, true)
@@ -108,9 +108,9 @@ func TestListDir_DirectoriesBeforeFiles(t *testing.T) {
 // TestListDir_SortByName verifies case-insensitive name sorting.
 func TestListDir_SortByName(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Charlie.txt"), []byte("c"), 0644)
-	os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("a"), 0644)
-	os.WriteFile(filepath.Join(dir, "bravo.txt"), []byte("b"), 0644)
+	os.WriteFile(filepath.Join(dir, "Charlie.txt"), []byte("c"), 0o644)
+	os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("a"), 0o644)
+	os.WriteFile(filepath.Join(dir, "bravo.txt"), []byte("b"), 0o644)
 
 	fs := New(newTestLogger())
 
@@ -144,9 +144,9 @@ func TestListDir_SortByName(t *testing.T) {
 // TestListDir_SortBySize verifies size sorting.
 func TestListDir_SortBySize(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "small.txt"), make([]byte, 10), 0644)
-	os.WriteFile(filepath.Join(dir, "large.txt"), make([]byte, 10000), 0644)
-	os.WriteFile(filepath.Join(dir, "medium.txt"), make([]byte, 1000), 0644)
+	os.WriteFile(filepath.Join(dir, "small.txt"), make([]byte, 10), 0o644)
+	os.WriteFile(filepath.Join(dir, "large.txt"), make([]byte, 10000), 0o644)
+	os.WriteFile(filepath.Join(dir, "medium.txt"), make([]byte, 1000), 0o644)
 
 	fs := New(newTestLogger())
 
@@ -193,7 +193,7 @@ func TestListDir_SortByDate(t *testing.T) {
 
 	for _, f := range files {
 		path := filepath.Join(dir, f.name)
-		os.WriteFile(path, []byte("x"), 0644)
+		os.WriteFile(path, []byte("x"), 0o644)
 		os.Chtimes(path, f.modTime, f.modTime)
 	}
 
@@ -236,7 +236,7 @@ func TestListDir_SymlinkDetection(t *testing.T) {
 	dir := t.TempDir()
 	// Create a file and a symlink to it
 	target := filepath.Join(dir, "target.txt")
-	os.WriteFile(target, []byte("data"), 0644)
+	os.WriteFile(target, []byte("data"), 0o644)
 	link := filepath.Join(dir, "link.txt")
 	os.Symlink(target, link)
 

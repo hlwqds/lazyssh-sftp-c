@@ -33,20 +33,20 @@ import (
 // Layout: FlexRow with content (FlexColumn: LocalPane + RemotePane) and StatusBar.
 type FileBrowser struct {
 	*tview.Flex
-	app           *tview.Application
-	log           *zap.SugaredLogger
-	fileService   ports.FileService
-	sftpService   ports.SFTPService
-	transferSvc   ports.TransferService
-	server        domain.Server
-	localPane     *LocalPane
-	remotePane    *RemotePane
-	statusBar     *tview.TextView
-	transferModal *TransferModal
-	activePane    int // 0 = local, 1 = remote
-	transferring  bool
+	app            *tview.Application
+	log            *zap.SugaredLogger
+	fileService    ports.FileService
+	sftpService    ports.SFTPService
+	transferSvc    ports.TransferService
+	server         domain.Server
+	localPane      *LocalPane
+	remotePane     *RemotePane
+	statusBar      *tview.TextView
+	transferModal  *TransferModal
+	activePane     int // 0 = local, 1 = remote
+	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
-	onClose       func()
+	onClose        func()
 }
 
 // NewFileBrowser creates a new FileBrowser with dual-pane layout.
@@ -119,8 +119,8 @@ func (fb *FileBrowser) build() {
 
 	// Build dual-pane content layout (50:50 per D-04)
 	content := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(fb.localPane, 0, 1, true).   // 50% width, initially focused
-		AddItem(fb.remotePane, 0, 1, false)  // 50% width
+		AddItem(fb.localPane, 0, 1, true).  // 50% width, initially focused
+		AddItem(fb.remotePane, 0, 1, false) // 50% width
 
 	// Build root layout: content + status bar
 	fb.SetDirection(tview.FlexRow).
@@ -391,7 +391,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		var failed []string
 		var err error
 
-			onConflict := fb.buildConflictHandler()
+		onConflict := fb.buildConflictHandler()
 		if fb.activePane == 0 {
 			// Upload directory
 			remoteBase := joinPath(fb.remotePane.GetCurrentPath(), dirName)

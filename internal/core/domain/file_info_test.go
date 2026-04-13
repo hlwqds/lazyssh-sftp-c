@@ -25,7 +25,7 @@ func TestFileInfoFields(t *testing.T) {
 	fi := FileInfo{
 		Name:      "test.txt",
 		Size:      1024,
-		Mode:      0644,
+		Mode:      0o644,
 		ModTime:   time.Now(),
 		IsDir:     false,
 		IsSymlink: false,
@@ -37,8 +37,8 @@ func TestFileInfoFields(t *testing.T) {
 	if fi.Size != 1024 {
 		t.Errorf("Size = %d, want %d", fi.Size, 1024)
 	}
-	if fi.Mode != 0644 {
-		t.Errorf("Mode = %v, want %v", fi.Mode, 0644)
+	if fi.Mode != 0o644 {
+		t.Errorf("Mode = %v, want %v", fi.Mode, 0o644)
 	}
 	if fi.IsDir != false {
 		t.Errorf("IsDir = %v, want %v", fi.IsDir, false)
@@ -53,7 +53,7 @@ func TestFileInfoDirEntry(t *testing.T) {
 	fi := FileInfo{
 		Name:      "docs",
 		Size:      4096,
-		Mode:      fs.ModeDir | 0755,
+		Mode:      fs.ModeDir | 0o755,
 		ModTime:   time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC),
 		IsDir:     true,
 		IsSymlink: false,
@@ -72,7 +72,7 @@ func TestFileInfoSymlinkEntry(t *testing.T) {
 	fi := FileInfo{
 		Name:      "link_to_dir",
 		Size:      0,
-		Mode:      fs.ModeSymlink | 0777,
+		Mode:      fs.ModeSymlink | 0o777,
 		ModTime:   time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		IsDir:     false,
 		IsSymlink: true,

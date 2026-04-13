@@ -29,10 +29,10 @@ import (
 // It displays file listings in 4 columns: Name, Size, Modified, Permissions.
 type LocalPane struct {
 	*tview.Table
-	log         *zap.SugaredLogger
-	fileService ports.FileService
-	currentPath string
-	sortMode    FileSortMode
+	log          *zap.SugaredLogger
+	fileService  ports.FileService
+	currentPath  string
+	sortMode     FileSortMode
 	showHidden   bool
 	selected     map[string]bool // multi-select state: file name -> selected
 	onPathChange func(path string)
@@ -57,7 +57,7 @@ func NewLocalPane(log *zap.SugaredLogger, fs ports.FileService, initialPath stri
 // build configures the Table with selection, borders, header, and key handling.
 func (lp *LocalPane) build() {
 	lp.SetSelectable(true, false) // row selection only (per UI-SPEC Pitfall 1)
-	lp.SetFixed(1, 0)            // fixed header row
+	lp.SetFixed(1, 0)             // fixed header row
 	lp.SetBorder(true).
 		SetBorderColor(tcell.Color238).
 		SetTitleColor(tcell.Color250).
@@ -340,4 +340,3 @@ func formatSize(bytes int64) string {
 		return fmt.Sprintf("%dB", bytes)
 	}
 }
-

@@ -29,14 +29,14 @@ import (
 // It displays connection states (Connecting, Connected, Error) and file listings.
 type RemotePane struct {
 	*tview.Table
-	log         *zap.SugaredLogger
-	sftpService ports.SFTPService
-	server      domain.Server
-	currentPath string
-	sortMode    FileSortMode
-	showHidden  bool
-	selected    map[string]bool // multi-select state: file name -> selected
-	connected   bool
+	log          *zap.SugaredLogger
+	sftpService  ports.SFTPService
+	server       domain.Server
+	currentPath  string
+	sortMode     FileSortMode
+	showHidden   bool
+	selected     map[string]bool // multi-select state: file name -> selected
+	connected    bool
 	onPathChange func(path string)
 	onFileAction func(fi domain.FileInfo)
 }
@@ -61,7 +61,7 @@ func NewRemotePane(log *zap.SugaredLogger, sftp ports.SFTPService, server domain
 // build configures the Table with selection, borders, header, and key handling.
 func (rp *RemotePane) build() {
 	rp.SetSelectable(true, false) // row selection only
-	rp.SetFixed(1, 0)            // fixed header row
+	rp.SetFixed(1, 0)             // fixed header row
 	rp.SetBorder(true).
 		SetBorderColor(tcell.Color238).
 		SetTitleColor(tcell.Color250).

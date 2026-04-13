@@ -19,9 +19,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Adembc/lazyssh/internal/adapters/data/ssh_config_file"
 	"github.com/Adembc/lazyssh/internal/adapters/data/local_fs"
 	"github.com/Adembc/lazyssh/internal/adapters/data/sftp_client"
+	"github.com/Adembc/lazyssh/internal/adapters/data/ssh_config_file"
 	"github.com/Adembc/lazyssh/internal/adapters/data/transfer"
 	"github.com/Adembc/lazyssh/internal/logger"
 

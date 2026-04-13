@@ -54,7 +54,7 @@ var conflictWarningColor = tcell.NewRGBColor(255, 165, 0) // #FFA500 orange
 type modalMode int
 
 const (
-	modeProgress      modalMode = iota // Normal progress display (existing)
+	modeProgress       modalMode = iota // Normal progress display (existing)
 	modeCancelConfirm                   // Cancel confirmation dialog (new)
 	modeConflictDialog                  // Conflict resolution dialog (Plan 02)
 	modeSummary                         // Transfer complete/canceled summary (existing)
@@ -75,10 +75,10 @@ type TransferModal struct {
 	bar *ProgressBar
 
 	// display state
-	fileLabel   string // "Uploading: filename.txt"
-	infoLine    string // "67%  2.3 MB/s"
-	etaLine     string // "ETA: 0m 12s"
-	summaryLine string // "Transferred 8/10 files, 2 failed"
+	fileLabel    string      // "Uploading: filename.txt"
+	infoLine     string      // "67%  2.3 MB/s"
+	etaLine      string      // "ETA: 0m 12s"
+	summaryLine  string      // "Transferred 8/10 files, 2 failed"
 	summaryColor tcell.Color // color for summary text (white for success, red for canceled)
 
 	// mode system
@@ -93,19 +93,19 @@ type TransferModal struct {
 	onDismiss func()
 
 	// conflict dialog state
-	conflictFileInfo string                   // "filename.txt (1.2M, 2024-03-15)"
-	conflictActionCh  chan domain.ConflictAction
+	conflictFileInfo string // "filename.txt (1.2M, 2024-03-15)"
+	conflictActionCh chan domain.ConflictAction
 }
 
 // NewTransferModal creates a new TransferModal overlay component.
 func NewTransferModal(app *tview.Application) *TransferModal {
 	tm := &TransferModal{
-		Box:           tview.NewBox().SetBorderPadding(2, 2, 5, 5),
-		app:           app,
-		bar:           NewProgressBar(),
-		visible:       false,
-		speedSamples:  make([]speedSample, 0, maxSpeedSamples),
-		summaryColor:  tcell.Color248,
+		Box:          tview.NewBox().SetBorderPadding(2, 2, 5, 5),
+		app:          app,
+		bar:          NewProgressBar(),
+		visible:      false,
+		speedSamples: make([]speedSample, 0, maxSpeedSamples),
+		summaryColor: tcell.Color248,
 	}
 	tm.SetBorder(true).
 		SetBorderColor(tcell.Color238).

@@ -223,12 +223,12 @@ func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath 
 			failed = append(failed, path)
 			if onProgress != nil {
 				onProgress(domain.TransferProgress{
-					FileName:   filepath.Base(path),
-					FilePath:   path,
-					FileIndex:  fileIndex,
-					FileTotal:  fileCount,
-					Failed:     true,
-					FailError:  err.Error(),
+					FileName:  filepath.Base(path),
+					FilePath:  path,
+					FileIndex: fileIndex,
+					FileTotal: fileCount,
+					Failed:    true,
+					FailError: err.Error(),
 				})
 			}
 		}
@@ -288,12 +288,12 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 			failed = append(failed, remoteFile)
 			if onProgress != nil {
 				onProgress(domain.TransferProgress{
-					FileName:   filepath.Base(remoteFile),
-					FilePath:   remoteFile,
-					FileIndex:  i + 1,
-					FileTotal:  fileCount,
-					Failed:     true,
-					FailError:  err.Error(),
+					FileName:  filepath.Base(remoteFile),
+					FilePath:  remoteFile,
+					FileIndex: i + 1,
+					FileTotal: fileCount,
+					Failed:    true,
+					FailError: err.Error(),
 				})
 			}
 			continue
@@ -307,12 +307,12 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 			failed = append(failed, remoteFile)
 			if onProgress != nil {
 				onProgress(domain.TransferProgress{
-					FileName:   filepath.Base(remoteFile),
-					FilePath:   remoteFile,
-					FileIndex:  i + 1,
-					FileTotal:  fileCount,
-					Failed:     true,
-					FailError:  err.Error(),
+					FileName:  filepath.Base(remoteFile),
+					FilePath:  remoteFile,
+					FileIndex: i + 1,
+					FileTotal: fileCount,
+					Failed:    true,
+					FailError: err.Error(),
 				})
 			}
 		}

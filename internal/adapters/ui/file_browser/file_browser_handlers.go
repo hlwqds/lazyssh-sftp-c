@@ -25,9 +25,9 @@ import (
 // 3. Table.InputHandler -> handles j/k/arrow/Enter/PgUp/PgDn (built-in)
 //
 // Esc handling (D-03 double-Esc pattern):
-// - If transfer modal is visible, delegate to TransferModal.HandleKey
-//   which manages progress->cancelConfirm->summary mode transitions
-// - Otherwise, close the file browser
+//   - If transfer modal is visible, delegate to TransferModal.HandleKey
+//     which manages progress->cancelConfirm->summary mode transitions
+//   - Otherwise, close the file browser
 func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyTab:
