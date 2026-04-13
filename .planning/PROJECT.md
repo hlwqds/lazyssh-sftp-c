@@ -26,14 +26,14 @@
 - ✓ 双栏文件浏览器 UI（左侧本地、右侧远程）— Validated in Phase 1: foundation
 - ✓ 本地文件/目录浏览（遍历本地文件系统）— Validated in Phase 1: foundation
 - ✓ 快捷键入口（在服务器列表按 F 键触发）— Validated in Phase 1: foundation
+- ✓ 远程文件/目录浏览（通过 SFTP 列出远程目录）— Validated in Phase 2: core-transfer
+- ✓ 文件上传（本地→远程）— Validated in Phase 2: core-transfer
+- ✓ 文件下载（远程→本地）— Validated in Phase 2: core-transfer
+- ✓ 目录递归传输（支持整个目录上传/下载）— Validated in Phase 2: core-transfer
+- ✓ 传输进度显示（进度条、速度、剩余时间）— Validated in Phase 2: core-transfer
 
 ### Active
 
-- [ ] 远程文件/目录浏览（通过 SFTP 列出远程目录）
-- [ ] 文件上传（本地→远程）
-- [ ] 文件下载（远程→本地）
-- [ ] 目录递归传输（支持整个目录上传/下载）
-- [ ] 传输进度显示（进度条、速度、剩余时间）
 - [ ] 文件冲突处理（覆盖/跳过/重命名询问）
 - [ ] 传输取消（中途取消正在进行的传输）
 
@@ -64,6 +64,8 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | 使用系统 scp/sftp 命令 | 与现有 SSH 连接方式一致，不引入新安全风险，跨平台兼容 | Phase 1: pkg/sftp NewClientPipe via system SSH binary |
+| 32KB 缓冲复制循环 | 替代 io.Copy，支持逐块进度回调 | Phase 2: TransferService 使用 32KB buffer + onProgress callback |
+| onFileAction 回调模式 | Pane Enter 事件传递到 FileBrowser 传输编排层 | Phase 2: local/remote pane 回调 → initiateTransfer |
 | 双栏浏览器 UI | 最直观的文件传输体验，类似 FileZilla | Phase 1: tview.Table 50:50 Flex layout |
 | 快捷键 F 触发 | 不改变主界面布局，最小化对现有功能的影响 | Phase 1: case 'F' in handleGlobalKeys |
 | 远程浏览通过 SFTP 子命令 | `sftp` 可用于 ls 等操作，无需 Go SSH 库 | Phase 1: pkg/sftp NewClientPipe via exec.Command("ssh") |
@@ -86,4 +88,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after Phase 1: foundation completion*
+*Last updated: 2026-04-13 after Phase 2: core-transfer completion*
