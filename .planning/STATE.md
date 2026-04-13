@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 ## Current Position
 
 Phase: 2
-Plan: 1 of 3
+Plan: 2 of 3
 Status: Executing Phase 02
 Last activity: 2026-04-13
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████████░░] 67%
 
 ## Performance Metrics
 
@@ -76,6 +76,9 @@ Recent decisions affecting current work:
 - [Phase 02 P01]: io.ReadCloser for remote file I/O -- download BytesTotal unknown (no Stat on interface)
 - [Phase 02 P01]: Two-pass directory walk for uploads (count then transfer), single WalkDir for downloads
 - [Phase 02 P01]: Partial failure model for directory transfers -- collect failed files, continue remaining
+- [Phase 02 P02]: Use tview.Print with AlignCenter for centered text instead of manual x-offset
+- [Phase 02 P02]: Use SetBorderPadding (not SetPadding) for tview.Box API compatibility
+- [Phase 02 P02]: Modal overlay pattern: embed tview.Box, implement Draw(), manage visibility flag
 
 ### Pending Todos
 

@@ -22,7 +22,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **TRAN-02**: User can download a single file from remote to local
 - [x] **TRAN-03**: User can upload a directory recursively from local to remote
 - [x] **TRAN-04**: User can download a directory recursively from remote to local
-- [ ] **TRAN-05**: User can see detailed transfer progress (progress bar, speed, ETA)
+- [x] **TRAN-05**: User can see detailed transfer progress (progress bar, speed, ETA)
 - [ ] **TRAN-06**: User can cancel an in-progress transfer
 - [ ] **TRAN-07**: User is prompted when destination file already exists (overwrite/skip/rename)
 
@@ -83,7 +83,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | TRAN-02 | Phase 2 | Service layer complete |
 | TRAN-03 | Phase 2 | Service layer complete |
 | TRAN-04 | Phase 2 | Service layer complete |
-| TRAN-05 | Phase 2 | Pending |
+| TRAN-05 | Phase 2 | Complete |
 | TRAN-06 | Phase 3 | Pending |
 | TRAN-07 | Phase 3 | Pending |
 | UI-01 | Phase 1 | Complete |
