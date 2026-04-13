@@ -44,8 +44,13 @@ Plans:
   2. User can select file(s) and press Enter to upload to remote or download to local
   3. User can select a directory and transfer it recursively to the other side, preserving directory structure
   4. User sees a progress bar with current speed and estimated remaining time during transfers
-**Plans**: TBD
+**Plans**: 3 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 02-01-PLAN.md — Transfer port & adapter layer: TransferProgress domain type, TransferService interface, SFTPService I/O extensions, TransferService implementation, unit tests
+- [ ] 02-02-PLAN.md — Transfer progress modal: ProgressBar renderer, TransferModal component with progress bar, speed, ETA
+- [ ] 02-03-PLAN.md — Wire transfers into file browser: Enter key file transfer, F5 directory transfer, auto-refresh, DI wiring
 
 ### Phase 3: Polish
 **Goal**: Users can safely handle edge cases with cancel support, conflict resolution, and reliable cross-platform operation
@@ -65,5 +70,5 @@ Phases execute in numeric order: 1 -> 2 -> 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 0/3 | Complete    | 2026-04-13 |
-| 2. Core Transfer | 0/? | Not started | - |
+| 2. Core Transfer | 0/3 | Planned | - |
 | 3. Polish | 0/? | Not started | - |
