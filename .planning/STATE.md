@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令
-**Current focus:** Phase 01 — foundation
+**Current focus:** Phase 02 — core-transfer
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-13
+Phase: 02
+Current Plan: 2 of 3
+Status: Executing Phase 02
+Last activity: 2026-04-13 -- Completed 02-02-PLAN (Transfer Progress Modal)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████████░░] 67%
 
 ## Performance Metrics
 
@@ -72,6 +72,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Dual-pane tview.Flex layout with 50:50 split and event propagation chain
 - [Phase 01]: Unix-style path helpers for remote path manipulation
 - [Phase 01]: Status bar created with separate method calls due to tview.Box return type
+- [Phase 02 P02]: Use tview.Print with AlignCenter for centered text instead of manual x-offset
+- [Phase 02 P02]: Use SetBorderPadding (not SetPadding) for tview.Box API compatibility
+- [Phase 02 P02]: Modal overlay pattern: embed tview.Box, implement Draw(), manage visibility flag
 
 ### Pending Todos
 
