@@ -63,8 +63,8 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Transfer cancel mechanism: context.Context propagation, copyWithProgress cancellation, TransferModal multi-mode system, double-Esc cancel confirm (D-03), partial file cleanup deferred to 03-02 (D-04)
-- [ ] 03-02-PLAN.md — File conflict resolution + cancel cleanup: SFTPService Stat/Remove, conflict detection, conflict dialog UI, Rename with .1 suffix, goroutine sync via actionCh, D-04 partial file cleanup
+- [x] 03-01-PLAN.md — Transfer cancel mechanism: context.Context propagation, copyWithProgress cancellation, TransferModal multi-mode system, double-Esc cancel confirm (D-03), partial file cleanup deferred to 03-02 (D-04)
+- [x] 03-02-PLAN.md — File conflict resolution + cancel cleanup: SFTPService Stat/Remove, conflict detection, conflict dialog UI, Rename with .1 suffix, goroutine sync via actionCh, D-04 partial file cleanup
 - [ ] 03-03-PLAN.md — Cross-platform compatibility: build tags for file permissions (Unix chmod / Windows no-op), path handling audit, display format verification, cross-compilation verification (GOOS=windows/darwin/linux)
 
 ## Progress
@@ -76,4 +76,4 @@ Phases execute in numeric order: 1 -> 2 -> 3
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete    | 2026-04-13 |
 | 2. Core Transfer | 1/3 | Executing | - |
-| 3. Polish | 0/3 | Planned | - |
+| 3. Polish | 2/3 | In Progress|  |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-04-13T07:00:16.350Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-04-13T07:22:03.911Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 3
-  completed_phases: 1
-  total_plans: 6
-  completed_plans: 7
+  completed_phases: 2
+  total_plans: 9
+  completed_plans: 8
   percent: 67
 ---
 
@@ -57,6 +57,7 @@ Progress: [████████░░] 67%
 | Phase 01 P03 | 70 | 2 tasks | 4 files |
 | Phase 02 P03 | 759 | 5 tasks | 7 files |
 | Phase 03 P01 | 477 | 2 tasks | 6 files |
+| Phase 03 P02 | 15min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 03]: D-03 double-Esc cancel: first Esc=confirm prompt, second Esc/y/Enter=confirm cancel, n=resume
 - [Phase 03]: D-04 partial file cleanup deferred to Plan 02 (depends on SFTPService.Remove())
 - [Phase 03]: DismissCallback does not hide modal on cancel — waits for goroutine ShowCanceledSummary()
+- [Phase 03]: SFTPService Stat/Remove enable conflict detection and D-04 partial file cleanup
+- [Phase 03]: ConflictHandler callback parameter keeps TransferService stateless for testability
+- [Phase 03]: Buffered channel (capacity 1) for actionCh prevents goroutine leak in conflict dialog sync
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T07:00:16.348Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-04-13T07:22:03.909Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
