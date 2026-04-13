@@ -23,6 +23,11 @@ import (
 // 1. FileBrowser.SetInputCapture -> handles Tab, Esc, s, S
 // 2. FocusedPane.SetInputCapture -> handles h, Backspace, Space, .
 // 3. Table.InputHandler -> handles j/k/arrow/Enter/PgUp/PgDn (built-in)
+//
+// Esc handling (D-03 double-Esc pattern):
+// - If transfer modal is visible, delegate to TransferModal.HandleKey
+//   which manages progress->cancelConfirm->summary mode transitions
+// - Otherwise, close the file browser
 func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyTab:
@@ -30,7 +35,7 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case tcell.KeyESC:
 		if fb.transferModal != nil && fb.transferModal.IsVisible() {
-			fb.transferModal.Hide()
+			fb.transferModal.HandleKey(event) // delegates to modal's HandleKey
 			return nil
 		}
 		fb.close()

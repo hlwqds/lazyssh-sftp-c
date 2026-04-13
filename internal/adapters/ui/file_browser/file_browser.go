@@ -15,6 +15,7 @@
 package file_browser
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,6 +45,7 @@ type FileBrowser struct {
 	transferModal *TransferModal
 	activePane    int // 0 = local, 1 = remote
 	transferring  bool
+	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose       func()
 }
 
@@ -87,6 +89,14 @@ func (fb *FileBrowser) build() {
 	// Create transfer modal
 	fb.transferModal = NewTransferModal(fb.app)
 	fb.transferModal.SetDismissCallback(func() {
+		if fb.transferModal.IsCanceled() {
+			if fb.transferCancel != nil {
+				fb.transferCancel()
+			}
+			// Do not close modal — wait for goroutine to complete and show canceled summary
+			return
+		}
+		// Normal dismiss (summary mode: any key closes)
 		fb.transferring = false
 		fb.app.SetRoot(fb, true)
 		fb.app.SetFocus(fb.currentPane())
@@ -188,6 +198,7 @@ func (fb *FileBrowser) currentPane() tview.Primitive {
 // initiateTransfer starts a file transfer for the currently selected file(s).
 // If multiple files are space-selected, all are transferred sequentially.
 // Direction is determined by activePane: 0=upload (local->remote), 1=download (remote->local).
+// Creates a cancellable context that is triggered when the user confirms cancellation.
 func (fb *FileBrowser) initiateTransfer() {
 	if fb.transferring {
 		return // already transferring
@@ -235,8 +246,20 @@ func (fb *FileBrowser) initiateTransfer() {
 		direction = "Downloading"
 	}
 
+	// Create cancellable context for this transfer
+	ctx, cancel := context.WithCancel(context.Background())
+	fb.transferCancel = cancel
+
 	// Show modal
 	fb.transferModal.SetDismissCallback(func() {
+		if fb.transferModal.IsCanceled() {
+			if fb.transferCancel != nil {
+				fb.transferCancel()
+			}
+			// Do not close modal — wait for goroutine to complete and show canceled summary
+			return
+		}
+		// Normal dismiss (summary mode: any key closes)
 		fb.transferring = false
 		fb.app.SetRoot(fb, true)
 		fb.app.SetFocus(fb.currentPane())
@@ -252,7 +275,7 @@ func (fb *FileBrowser) initiateTransfer() {
 				// Upload
 				localPath := filepath.Join(fb.localPane.GetCurrentPath(), fi.Name)
 				remotePath := joinPath(fb.remotePane.GetCurrentPath(), fi.Name)
-				err = fb.transferSvc.UploadFile(localPath, remotePath, func(p domain.TransferProgress) {
+				err = fb.transferSvc.UploadFile(ctx, localPath, remotePath, func(p domain.TransferProgress) {
 					p.FileIndex = i + 1
 					p.FileTotal = len(files)
 					fb.app.QueueUpdateDraw(func() {
@@ -263,7 +286,7 @@ func (fb *FileBrowser) initiateTransfer() {
 				// Download
 				remotePath := joinPath(fb.remotePane.GetCurrentPath(), fi.Name)
 				localPath := filepath.Join(fb.localPane.GetCurrentPath(), fi.Name)
-				err = fb.transferSvc.DownloadFile(remotePath, localPath, func(p domain.TransferProgress) {
+				err = fb.transferSvc.DownloadFile(ctx, remotePath, localPath, func(p domain.TransferProgress) {
 					p.FileIndex = i + 1
 					p.FileTotal = len(files)
 					fb.app.QueueUpdateDraw(func() {
@@ -275,10 +298,17 @@ func (fb *FileBrowser) initiateTransfer() {
 				firstErr = err
 				fb.log.Errorw("file transfer failed", "file", fi.Name, "error", err)
 			}
+			// If context was canceled, stop processing remaining files
+			if ctx.Err() != nil {
+				break
+			}
 		}
 
 		fb.app.QueueUpdateDraw(func() {
-			if firstErr != nil {
+			if ctx.Err() == context.Canceled {
+				// Show canceled summary — user pressed y/Enter/Esc in cancel confirm
+				fb.transferModal.ShowCanceledSummary()
+			} else if firstErr != nil {
 				failedCount := 1
 				if len(files) > 1 {
 					failedCount = 1
@@ -293,6 +323,7 @@ func (fb *FileBrowser) initiateTransfer() {
 					fb.localPane.Refresh()
 				}
 			}
+			fb.transferCancel = nil
 		})
 	}()
 }
@@ -300,6 +331,7 @@ func (fb *FileBrowser) initiateTransfer() {
 // initiateDirTransfer starts a recursive directory transfer for the current pane's directory.
 // F5 on local pane uploads the current directory to the remote pane's current path.
 // F5 on remote pane downloads the current directory to the local pane's current path.
+// Creates a cancellable context that is triggered when the user confirms cancellation.
 func (fb *FileBrowser) initiateDirTransfer() {
 	if fb.transferring {
 		return
@@ -335,7 +367,19 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		direction = "Downloading"
 	}
 
+	// Create cancellable context for this transfer
+	ctx, cancel := context.WithCancel(context.Background())
+	fb.transferCancel = cancel
+
 	fb.transferModal.SetDismissCallback(func() {
+		if fb.transferModal.IsCanceled() {
+			if fb.transferCancel != nil {
+				fb.transferCancel()
+			}
+			// Do not close modal — wait for goroutine to complete and show canceled summary
+			return
+		}
+		// Normal dismiss (summary mode: any key closes)
 		fb.transferring = false
 		fb.app.SetRoot(fb, true)
 		fb.app.SetFocus(fb.currentPane())
@@ -349,7 +393,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		if fb.activePane == 0 {
 			// Upload directory
 			remoteBase := joinPath(fb.remotePane.GetCurrentPath(), dirName)
-			failed, err = fb.transferSvc.UploadDir(dirPath, remoteBase, func(p domain.TransferProgress) {
+			failed, err = fb.transferSvc.UploadDir(ctx, dirPath, remoteBase, func(p domain.TransferProgress) {
 				fb.app.QueueUpdateDraw(func() {
 					fb.transferModal.Update(p)
 				})
@@ -357,7 +401,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		} else {
 			// Download directory
 			localBase := filepath.Join(fb.localPane.GetCurrentPath(), dirName)
-			failed, err = fb.transferSvc.DownloadDir(dirPath, localBase, func(p domain.TransferProgress) {
+			failed, err = fb.transferSvc.DownloadDir(ctx, dirPath, localBase, func(p domain.TransferProgress) {
 				fb.app.QueueUpdateDraw(func() {
 					fb.transferModal.Update(p)
 				})
@@ -365,7 +409,10 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		}
 
 		fb.app.QueueUpdateDraw(func() {
-			if err != nil {
+			if ctx.Err() == context.Canceled {
+				// Show canceled summary
+				fb.transferModal.ShowCanceledSummary()
+			} else if err != nil {
 				fb.log.Errorw("directory transfer failed", "error", err)
 				fb.transferModal.ShowSummary(0, 1, []string{err.Error()})
 			} else if len(failed) > 0 {
@@ -379,6 +426,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 					fb.localPane.Refresh()
 				}
 			}
+			fb.transferCancel = nil
 		})
 	}()
 }
