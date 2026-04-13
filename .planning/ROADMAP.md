@@ -32,8 +32,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — Domain types, port interfaces, LocalFS adapter, SFTP client adapter, buildSSHArgs extraction
-- [ ] 01-02-PLAN.md — Dual-pane file browser UI component (local pane, remote pane placeholder, keyboard handlers, status bar)
-- [ ] 01-03-PLAN.md — Wire file browser into existing TUI (F key entry, dependency injection, status bar update)
+- [x] 01-02-PLAN.md — Dual-pane file browser UI component (local pane, remote pane placeholder, keyboard handlers, status bar)
+- [x] 01-03-PLAN.md — Wire file browser into existing TUI (F key entry, dependency injection, status bar update)
 
 ### Phase 2: Core Transfer
 **Goal**: Users can browse remote files via SFTP and transfer files and directories between local and remote with progress feedback
