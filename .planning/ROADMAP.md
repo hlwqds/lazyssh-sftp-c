@@ -60,7 +60,12 @@ Plans:
   1. User can cancel a transfer in progress and the system cleans up any partial files left on the destination
   2. When a file already exists at the destination, user is prompted with overwrite/skip/rename options before proceeding
   3. File browsing and transfer work correctly on Linux, Windows, and macOS without platform-specific breakage
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Transfer cancel mechanism: context.Context propagation, copyWithProgress cancellation, TransferModal multi-mode system, double-Esc cancel confirm
+- [ ] 03-02-PLAN.md — File conflict resolution: SFTPService Stat/Remove, conflict detection before transfer, conflict dialog UI, Rename with .1 suffix, goroutine sync via actionCh
+- [ ] 03-03-PLAN.md — Cross-platform compatibility: build tags for file permissions (Unix chmod / Windows no-op), path handling audit, display format verification
 
 ## Progress
 
@@ -71,4 +76,4 @@ Phases execute in numeric order: 1 -> 2 -> 3
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete    | 2026-04-13 |
 | 2. Core Transfer | 1/3 | Executing | - |
-| 3. Polish | 0/? | Not started | - |
+| 3. Polish | 0/3 | Planned | - |
