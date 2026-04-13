@@ -15,7 +15,9 @@
 package ports
 
 import (
+	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"testing"
 
@@ -62,6 +64,46 @@ func (m *mockSFTPService) WalkDir(path string) ([]string, error) {
 	return nil, nil
 }
 
+func (m *mockSFTPService) Stat(path string) (os.FileInfo, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockSFTPService) Remove(path string) error {
+	return nil
+}
+
+// TestSFTPServiceStat verifies SFTPService interface has Stat method.
+func TestSFTPServiceStat(t *testing.T) {
+	sftpType := reflect.TypeOf((*SFTPService)(nil)).Elem()
+	method, ok := sftpType.MethodByName("Stat")
+	if !ok {
+		t.Fatal("SFTPService interface missing Stat method")
+	}
+	// Verify Stat signature: Stat(path string) (os.FileInfo, error)
+	if method.Type.NumIn() != 2 { // receiver + path
+		t.Errorf("Stat should have 1 parameter, got %d", method.Type.NumIn()-1)
+	}
+	if method.Type.NumOut() != 2 {
+		t.Errorf("Stat should have 2 return values, got %d", method.Type.NumOut())
+	}
+}
+
+// TestSFTPServiceRemove verifies SFTPService interface has Remove method.
+func TestSFTPServiceRemove(t *testing.T) {
+	sftpType := reflect.TypeOf((*SFTPService)(nil)).Elem()
+	method, ok := sftpType.MethodByName("Remove")
+	if !ok {
+		t.Fatal("SFTPService interface missing Remove method")
+	}
+	// Verify Remove signature: Remove(path string) error
+	if method.Type.NumIn() != 2 { // receiver + path
+		t.Errorf("Remove should have 1 parameter, got %d", method.Type.NumIn()-1)
+	}
+	if method.Type.NumOut() != 1 {
+		t.Errorf("Remove should have 1 return value, got %d", method.Type.NumOut())
+	}
+}
+
 // TestFileServiceInterface verifies FileService interface exists and has correct methods.
 func TestFileServiceInterface(t *testing.T) {
 	fsType := reflect.TypeOf((*FileService)(nil)).Elem()
@@ -92,7 +134,7 @@ func TestSFTPServiceInterface(t *testing.T) {
 	}
 
 	// SFTPService should have its own methods
-	for _, method := range []string{"Connect", "Close", "IsConnected", "CreateRemoteFile", "OpenRemoteFile", "MkdirAll", "WalkDir"} {
+	for _, method := range []string{"Connect", "Close", "IsConnected", "CreateRemoteFile", "OpenRemoteFile", "MkdirAll", "WalkDir", "Stat", "Remove"} {
 		_, ok := sftpType.MethodByName(method)
 		if !ok {
 			t.Errorf("SFTPService interface missing %s method", method)
