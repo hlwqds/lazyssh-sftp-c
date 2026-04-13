@@ -12,7 +12,7 @@
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Dual-pane UI shell, local file browsing, SFTP connection setup
+- [x] **Phase 1: Foundation** - Dual-pane UI shell, local file browsing, SFTP connection setup (completed 2026-04-13)
 - [ ] **Phase 2: Core Transfer** - Remote browsing, file/directory transfer, progress display
 - [ ] **Phase 3: Polish** - Transfer cancel, conflict handling, cross-platform support
 
@@ -64,6 +64,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/3 | Planning complete | - |
+| 1. Foundation | 0/3 | Complete    | 2026-04-13 |
 | 2. Core Transfer | 0/? | Not started | - |
 | 3. Polish | 0/? | Not started | - |
