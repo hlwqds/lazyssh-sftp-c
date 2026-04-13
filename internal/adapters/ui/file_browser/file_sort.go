@@ -164,3 +164,11 @@ func sortEntries(entries []domain.FileInfo, field domain.FileSortField, asc bool
 		return !less
 	})
 }
+
+// trimError truncates an error message to a maximum length for display.
+func trimError(err string, maxLen int) string {
+	if len(err) <= maxLen {
+		return err
+	}
+	return err[:maxLen-3] + "..."
+}
