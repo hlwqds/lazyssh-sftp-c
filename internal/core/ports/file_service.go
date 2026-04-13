@@ -15,6 +15,8 @@
 package ports
 
 import (
+	"io"
+
 	"github.com/Adembc/lazyssh/internal/core/domain"
 )
 
@@ -38,4 +40,13 @@ type SFTPService interface {
 	Close() error
 	// IsConnected returns whether the SFTP connection is active.
 	IsConnected() bool
+
+	// CreateRemoteFile creates a new remote file for writing.
+	CreateRemoteFile(path string) (io.WriteCloser, error)
+	// OpenRemoteFile opens an existing remote file for reading.
+	OpenRemoteFile(path string) (io.ReadCloser, error)
+	// MkdirAll creates remote directories recursively, skipping existing ones.
+	MkdirAll(path string) error
+	// WalkDir returns all file paths (not directories) under the given remote path, recursively.
+	WalkDir(path string) ([]string, error)
 }
