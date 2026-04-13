@@ -46,7 +46,23 @@ func New(log *zap.SugaredLogger, sftp ports.SFTPService) *transferService {
 // UploadFile uploads a single file from local to remote.
 // ctx controls cancellation — returns context.Canceled if ctx is done.
 // onProgress is called periodically during transfer.
-func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error {
+// onConflict is called when remote file exists; nil means always overwrite.
+func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error {
+	// Conflict detection (D-06)
+	if onConflict != nil {
+		if _, err := ts.sftp.Stat(remotePath); err == nil {
+			action, newPath := onConflict(filepath.Base(remotePath))
+			switch action {
+			case domain.ConflictSkip:
+				return nil
+			case domain.ConflictRename:
+				remotePath = newPath
+			case domain.ConflictOverwrite:
+				// continue with original path
+			}
+		}
+	}
+
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
@@ -63,11 +79,16 @@ func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath
 	if err != nil {
 		return fmt.Errorf("create remote %s: %w", remotePath, err)
 	}
-	defer remoteFile.Close()
 
 	err = ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, total, onProgress)
+	remoteFile.Close()
+
+	// D-04: cancel cleanup — delete partial remote file
 	if err == context.Canceled {
-		ts.log.Infow("transfer canceled", "path", remotePath)
+		ts.log.Infow("transfer canceled, cleaning up partial file", "path", remotePath)
+		if removeErr := ts.sftp.Remove(remotePath); removeErr != nil {
+			ts.log.Warnw("failed to cleanup partial remote file", "path", remotePath, "error", removeErr)
+		}
 		return context.Canceled
 	}
 	return err
@@ -76,7 +97,23 @@ func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath
 // DownloadFile downloads a single file from remote to local.
 // ctx controls cancellation — returns context.Canceled if ctx is done.
 // onProgress is called periodically during transfer.
-func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error {
+// onConflict is called when local file exists; nil means always overwrite.
+func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error {
+	// Conflict detection (D-06)
+	if onConflict != nil {
+		if _, err := os.Stat(localPath); err == nil {
+			action, newPath := onConflict(filepath.Base(localPath))
+			switch action {
+			case domain.ConflictSkip:
+				return nil
+			case domain.ConflictRename:
+				localPath = newPath
+			case domain.ConflictOverwrite:
+				// continue with original path
+			}
+		}
+	}
+
 	remoteFile, err := ts.sftp.OpenRemoteFile(remotePath)
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
@@ -92,13 +129,16 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 	if err != nil {
 		return fmt.Errorf("create local %s: %w", localPath, err)
 	}
-	defer localFile.Close()
 
-	// Remote file size is not available through io.ReadCloser interface;
-	// pass 0 to indicate unknown size.
 	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, onProgress)
+	localFile.Close()
+
+	// D-04: cancel cleanup — delete partial local file
 	if err == context.Canceled {
-		ts.log.Infow("transfer canceled", "path", localPath)
+		ts.log.Infow("transfer canceled, cleaning up partial file", "path", localPath)
+		if removeErr := os.Remove(localPath); removeErr != nil {
+			ts.log.Warnw("failed to cleanup partial local file", "path", localPath, "error", removeErr)
+		}
 		return context.Canceled
 	}
 	return err
@@ -106,8 +146,9 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 
 // UploadDir recursively uploads a directory from local to remote.
 // ctx controls cancellation — stops remaining files if ctx is done.
+// onConflict is called for each conflicting file; nil means always overwrite.
 // Returns list of failed file paths (empty = all success).
-func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error) {
 	// First pass: count total files
 	var fileCount int
 	err := filepath.WalkDir(localPath, func(path string, d fs.DirEntry, err error) error {
@@ -168,7 +209,7 @@ func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath 
 			}
 		}
 
-		if err := ts.uploadSingleFile(ctx, path, remoteFile, onProgress, fileIndex, fileCount); err != nil {
+		if err := ts.uploadSingleFile(ctx, path, remoteFile, onProgress, fileIndex, fileCount, onConflict); err != nil {
 			if err == context.Canceled {
 				return context.Canceled
 			}
@@ -203,8 +244,9 @@ func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath 
 
 // DownloadDir recursively downloads a directory from remote to local.
 // ctx controls cancellation — stops remaining files if ctx is done.
+// onConflict is called for each conflicting file; nil means always overwrite.
 // Returns list of failed file paths (empty = all success).
-func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error) {
 	// Get list of all remote files
 	remoteFiles, err := ts.sftp.WalkDir(remotePath)
 	if err != nil {
@@ -251,7 +293,7 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 			continue
 		}
 
-		if err := ts.downloadSingleFile(ctx, remoteFile, localFile, onProgress, i+1, fileCount); err != nil {
+		if err := ts.downloadSingleFile(ctx, remoteFile, localFile, onProgress, i+1, fileCount, onConflict); err != nil {
 			if err == context.Canceled {
 				return failed, context.Canceled
 			}
@@ -277,7 +319,22 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 }
 
 // uploadSingleFile uploads a single file with progress tracking for directory transfers.
-func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
+func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int, onConflict domain.ConflictHandler) error {
+	// Conflict detection for individual file in directory transfer
+	if onConflict != nil {
+		if _, err := ts.sftp.Stat(remotePath); err == nil {
+			action, newPath := onConflict(filepath.Base(remotePath))
+			switch action {
+			case domain.ConflictSkip:
+				return nil
+			case domain.ConflictRename:
+				remotePath = newPath
+			case domain.ConflictOverwrite:
+				// continue with original path
+			}
+		}
+	}
+
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
@@ -293,21 +350,43 @@ func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remo
 	if err != nil {
 		return fmt.Errorf("create remote %s: %w", remotePath, err)
 	}
-	defer remoteFile.Close()
 
-	progress := func(p domain.TransferProgress) {
+	err = ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, stat.Size(), func(p domain.TransferProgress) {
 		p.FileIndex = fileIndex
 		p.FileTotal = fileTotal
 		if onProgress != nil {
 			onProgress(p)
 		}
-	}
+	})
+	remoteFile.Close()
 
-	return ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, stat.Size(), progress)
+	// D-04: cancel cleanup
+	if err == context.Canceled {
+		if removeErr := ts.sftp.Remove(remotePath); removeErr != nil {
+			ts.log.Warnw("failed to cleanup partial remote file", "path", remotePath, "error", removeErr)
+		}
+		return context.Canceled
+	}
+	return err
 }
 
 // downloadSingleFile downloads a single file with progress tracking for directory transfers.
-func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
+func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int, onConflict domain.ConflictHandler) error {
+	// Conflict detection for individual file in directory transfer
+	if onConflict != nil {
+		if _, err := os.Stat(localPath); err == nil {
+			action, newPath := onConflict(filepath.Base(localPath))
+			switch action {
+			case domain.ConflictSkip:
+				return nil
+			case domain.ConflictRename:
+				localPath = newPath
+			case domain.ConflictOverwrite:
+				// continue with original path
+			}
+		}
+	}
+
 	remoteFile, err := ts.sftp.OpenRemoteFile(remotePath)
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
@@ -318,17 +397,24 @@ func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, l
 	if err != nil {
 		return fmt.Errorf("create local %s: %w", localPath, err)
 	}
-	defer localFile.Close()
 
-	progress := func(p domain.TransferProgress) {
+	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, func(p domain.TransferProgress) {
 		p.FileIndex = fileIndex
 		p.FileTotal = fileTotal
 		if onProgress != nil {
 			onProgress(p)
 		}
-	}
+	})
+	localFile.Close()
 
-	return ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, progress)
+	// D-04: cancel cleanup
+	if err == context.Canceled {
+		if removeErr := os.Remove(localPath); removeErr != nil {
+			ts.log.Warnw("failed to cleanup partial local file", "path", localPath, "error", removeErr)
+		}
+		return context.Canceled
+	}
+	return err
 }
 
 // copyWithProgress copies data from src to dst using a 32KB buffer,
@@ -391,4 +477,22 @@ func joinRemotePath(base, rel string) string {
 		return base + rel
 	}
 	return base + "/" + rel
+}
+
+// nextAvailableName finds a non-conflicting file name by appending incremental suffixes.
+// Format: {stem}.{counter}{extension} (e.g., file.1.txt, file.2.txt).
+// Tries counters 1 through 100. Returns original path if all candidates exist.
+func nextAvailableName(path string, statFunc func(string) (os.FileInfo, error)) string {
+	ext := filepath.Ext(path)
+	name := filepath.Base(path)
+	dir := filepath.Dir(path)
+	stem := name[:len(name)-len(ext)]
+
+	for i := 1; i <= 100; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s.%d%s", stem, i, ext))
+		if _, err := statFunc(candidate); err != nil {
+			return candidate
+		}
+	}
+	return path
 }

@@ -30,3 +30,20 @@ type TransferProgress struct {
 	Failed     bool    // true when current file failed
 	FailError  string  // error message if Failed is true
 }
+
+// ConflictAction represents the user's decision when a file conflict is detected.
+type ConflictAction int
+
+const (
+	// ConflictOverwrite overwrites the existing file.
+	ConflictOverwrite ConflictAction = iota
+	// ConflictSkip skips the conflicting file.
+	ConflictSkip
+	// ConflictRename renames the file with an incremental suffix (e.g., file.1.txt).
+	ConflictRename
+)
+
+// ConflictHandler is a callback invoked when a destination file already exists.
+// It receives the file name and returns the chosen action and new path (for Rename).
+// The new path is only used when action is ConflictRename.
+type ConflictHandler func(fileName string) (ConflictAction, string)

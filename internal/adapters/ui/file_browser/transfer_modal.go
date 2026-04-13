@@ -47,6 +47,9 @@ var cancelWarningColor = tcell.NewRGBColor(255, 215, 0) // #FFD700 gold
 // cancelConfirmedColor is the red color for "Transfer canceled" text.
 var cancelConfirmedColor = tcell.NewRGBColor(255, 107, 107) // #FF6B6B red
 
+// conflictWarningColor is the orange color for "File already exists:" prompt.
+var conflictWarningColor = tcell.NewRGBColor(255, 165, 0) // #FFA500 orange
+
 // modalMode enumerates the display modes of the TransferModal.
 type modalMode int
 
@@ -88,6 +91,10 @@ type TransferModal struct {
 	// modal state
 	visible   bool
 	onDismiss func()
+
+	// conflict dialog state
+	conflictFileInfo string                   // "filename.txt (1.2M, 2024-03-15)"
+	conflictActionCh  chan domain.ConflictAction
 }
 
 // NewTransferModal creates a new TransferModal overlay component.
@@ -124,6 +131,8 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	switch tm.mode {
 	case modeCancelConfirm:
 		tm.drawCancelConfirm(screen, x, y, width, height)
+	case modeConflictDialog:
+		tm.drawConflictDialog(screen, x, y, width, height)
 	case modeSummary:
 		tm.drawSummary(screen, x, y, width, height)
 	default:
@@ -170,6 +179,17 @@ func (tm *TransferModal) drawCancelConfirm(screen tcell.Screen, x, y, width, hei
 
 	// Footer hint
 	tview.Print(screen, "Press Esc to continue transfer", x, y+height-2, width, tview.AlignCenter, tcell.Color245)
+}
+
+// drawConflictDialog renders the conflict resolution dialog.
+// Layout per 03-UI-SPEC Mode 3: file info + three options.
+func (tm *TransferModal) drawConflictDialog(screen tcell.Screen, x, y, width, height int) {
+	row := y + 1
+	tview.Print(screen, "File already exists:", x, row, width, tview.AlignCenter, conflictWarningColor)
+	row++
+	tview.Print(screen, tm.conflictFileInfo, x, row, width, tview.AlignCenter, tcell.Color255)
+	row += 2
+	tview.Print(screen, "[o] Overwrite  [s] Skip  [r] Rename", x, row, width, tview.AlignCenter, tcell.Color255)
 }
 
 // drawSummary renders the transfer summary (completion or canceled).
@@ -248,10 +268,26 @@ func (tm *TransferModal) ShowCanceledSummary() {
 	tm.infoLine = ""
 	tm.etaLine = ""
 	tm.fileLabel = ""
+	tm.conflictFileInfo = ""
+	tm.conflictActionCh = nil
 
 	tm.summaryLine = "Transfer canceled"
 	tm.summaryColor = cancelConfirmedColor
 	tm.SetTitle(" Transfer Complete ")
+}
+
+// ShowConflict switches the modal to conflict dialog mode.
+// actionCh is a buffered channel (capacity 1) used to send the user's choice
+// back to the transfer goroutine. The goroutine blocks on <-actionCh.
+func (tm *TransferModal) ShowConflict(fileName, fileInfo string, actionCh chan domain.ConflictAction) {
+	tm.mode = modeConflictDialog
+	tm.conflictFileInfo = fmt.Sprintf("%s (%s)", fileName, fileInfo)
+	tm.conflictActionCh = actionCh
+}
+
+// InConflictDialog returns whether the modal is currently showing the conflict dialog.
+func (tm *TransferModal) InConflictDialog() bool {
+	return tm.mode == modeConflictDialog
 }
 
 // ShowSummary displays a directory transfer summary instead of per-file progress.
@@ -318,6 +354,29 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 	}
 
 	switch tm.mode {
+	case modeConflictDialog:
+		switch event.Rune() {
+		case 'o':
+			if tm.conflictActionCh != nil {
+				tm.conflictActionCh <- domain.ConflictOverwrite
+			}
+			tm.mode = modeProgress
+			return nil
+		case 's':
+			if tm.conflictActionCh != nil {
+				tm.conflictActionCh <- domain.ConflictSkip
+			}
+			tm.mode = modeProgress
+			return nil
+		case 'r':
+			if tm.conflictActionCh != nil {
+				tm.conflictActionCh <- domain.ConflictRename
+			}
+			tm.mode = modeProgress
+			return nil
+		}
+		return nil // consume all other keys in conflict dialog mode
+
 	case modeCancelConfirm:
 		switch event.Key() {
 		case tcell.KeyEscape:

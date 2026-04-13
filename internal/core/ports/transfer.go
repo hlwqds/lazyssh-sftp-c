@@ -23,24 +23,29 @@ import (
 // TransferService provides file transfer operations between local filesystem and remote SFTP.
 // Implementations coordinate local os operations with remote SFTPService operations.
 // All methods accept ctx context.Context as first parameter for cancel propagation.
+// All methods accept onConflict callback for conflict resolution (nil = always overwrite).
 type TransferService interface {
 	// UploadFile uploads a single file from local to remote.
 	// ctx controls cancellation — returns context.Canceled if ctx is done.
 	// onProgress is called periodically during transfer.
-	UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error
+	// onConflict is called when remote file exists; returns action and new path for Rename.
+	UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error
 
 	// DownloadFile downloads a single file from remote to local.
 	// ctx controls cancellation — returns context.Canceled if ctx is done.
 	// onProgress is called periodically during transfer.
-	DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error
+	// onConflict is called when local file exists; returns action and new path for Rename.
+	DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error
 
 	// UploadDir recursively uploads a directory from local to remote.
 	// ctx controls cancellation — stops remaining files if ctx is done.
+	// onConflict is called for each conflicting file.
 	// Returns list of failed file paths (empty = all success).
-	UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error)
+	UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
 
 	// DownloadDir recursively downloads a directory from remote to local.
 	// ctx controls cancellation — stops remaining files if ctx is done.
+	// onConflict is called for each conflicting file.
 	// Returns list of failed file paths (empty = all success).
-	DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error)
+	DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
 }

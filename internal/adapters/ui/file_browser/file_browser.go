@@ -269,6 +269,7 @@ func (fb *FileBrowser) initiateTransfer() {
 	// Start transfer in goroutine
 	go func() {
 		var firstErr error
+		onConflict := fb.buildConflictHandler()
 		for i, fi := range files {
 			var err error
 			if fb.activePane == 0 {
@@ -281,7 +282,7 @@ func (fb *FileBrowser) initiateTransfer() {
 					fb.app.QueueUpdateDraw(func() {
 						fb.transferModal.Update(p)
 					})
-				})
+				}, onConflict)
 			} else {
 				// Download
 				remotePath := joinPath(fb.remotePane.GetCurrentPath(), fi.Name)
@@ -292,7 +293,7 @@ func (fb *FileBrowser) initiateTransfer() {
 					fb.app.QueueUpdateDraw(func() {
 						fb.transferModal.Update(p)
 					})
-				})
+				}, onConflict)
 			}
 			if err != nil && firstErr == nil {
 				firstErr = err
@@ -390,6 +391,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		var failed []string
 		var err error
 
+			onConflict := fb.buildConflictHandler()
 		if fb.activePane == 0 {
 			// Upload directory
 			remoteBase := joinPath(fb.remotePane.GetCurrentPath(), dirName)
@@ -397,7 +399,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 				fb.app.QueueUpdateDraw(func() {
 					fb.transferModal.Update(p)
 				})
-			})
+			}, onConflict)
 		} else {
 			// Download directory
 			localBase := filepath.Join(fb.localPane.GetCurrentPath(), dirName)
@@ -405,7 +407,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 				fb.app.QueueUpdateDraw(func() {
 					fb.transferModal.Update(p)
 				})
-			})
+			}, onConflict)
 		}
 
 		fb.app.QueueUpdateDraw(func() {
@@ -434,4 +436,78 @@ func (fb *FileBrowser) initiateDirTransfer() {
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
 	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+}
+
+// buildConflictHandler creates the onConflict callback for file transfers.
+// It uses a buffered channel (capacity 1) for goroutine synchronization:
+// the transfer goroutine blocks on <-actionCh while the UI thread handles user input.
+func (fb *FileBrowser) buildConflictHandler() domain.ConflictHandler {
+	return func(fileName string) (domain.ConflictAction, string) {
+		actionCh := make(chan domain.ConflictAction, 1)
+
+		// Gather existing file info for the dialog
+		var existingInfo string
+		if fb.activePane == 0 {
+			// Upload: check remote file info
+			if fi, err := fb.sftpService.Stat(joinPath(fb.remotePane.GetCurrentPath(), fileName)); err == nil {
+				existingInfo = fmt.Sprintf("%s, %s", formatSize(fi.Size()), fi.ModTime().Format("2006-01-02 15:04"))
+			}
+		} else {
+			// Download: check local file info
+			if fi, err := os.Stat(filepath.Join(fb.localPane.GetCurrentPath(), fileName)); err == nil {
+				existingInfo = fmt.Sprintf("%s, %s", formatSize(fi.Size()), fi.ModTime().Format("2006-01-02 15:04"))
+			}
+		}
+
+		// Show conflict dialog on UI thread
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.ShowConflict(fileName, existingInfo, actionCh)
+		})
+
+		// Block until user makes a choice (goroutine blocks, UI thread is free)
+		action := <-actionCh
+
+		switch action {
+		case domain.ConflictSkip:
+			fb.app.QueueUpdateDraw(func() {
+				fb.updateStatusBarTemp(fmt.Sprintf("[#FFA500]Skipped: %s[-]", fileName))
+			})
+			return action, ""
+		case domain.ConflictRename:
+			var newPath string
+			if fb.activePane == 0 {
+				newPath = nextAvailableName(joinPath(fb.remotePane.GetCurrentPath(), fileName), fb.sftpService.Stat)
+			} else {
+				newPath = nextAvailableName(filepath.Join(fb.localPane.GetCurrentPath(), fileName), os.Stat)
+			}
+			baseName := filepath.Base(newPath)
+			fb.app.QueueUpdateDraw(func() {
+				fb.updateStatusBarTemp(fmt.Sprintf("[#FFA500]Renamed to: %s[-]", baseName))
+			})
+			return action, newPath
+		default:
+			fb.app.QueueUpdateDraw(func() {
+				fb.updateStatusBarTemp(fmt.Sprintf("[#FFA500]Overwrote: %s[-]", fileName))
+			})
+			return action, ""
+		}
+	}
+}
+
+// nextAvailableName finds a non-conflicting file name by appending incremental suffixes.
+// Format: {stem}.{counter}{extension} (e.g., file.1.txt, file.2.txt).
+// Tries counters 1 through 100. Returns original path if all candidates exist.
+func nextAvailableName(path string, statFunc func(string) (os.FileInfo, error)) string {
+	ext := filepath.Ext(path)
+	name := filepath.Base(path)
+	dir := filepath.Dir(path)
+	stem := name[:len(name)-len(ext)]
+
+	for i := 1; i <= 100; i++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s.%d%s", stem, i, ext))
+		if _, err := statFunc(candidate); err != nil {
+			return candidate
+		}
+	}
+	return path
 }

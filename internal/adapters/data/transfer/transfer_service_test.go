@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
 	"go.uber.org/zap"
@@ -41,6 +42,13 @@ type mockSFTPService struct {
 	createErr error
 	openErr   error
 	openData  []byte
+	// For Stat: track existing files and simulate stat results
+	statFile os.FileInfo
+	statErr  error
+	// For Remove: track removed paths
+	removedPaths []string
+	// For CreateRemoteFile: track created paths
+	createdPaths map[string]bool
 }
 
 func (m *mockSFTPService) ListDir(path string, showHidden bool, sortField domain.FileSortField, sortAsc bool) ([]domain.FileInfo, error) {
@@ -65,6 +73,9 @@ func (m *mockSFTPService) CreateRemoteFile(path string) (io.WriteCloser, error) 
 	if m.createErr != nil {
 		return nil, m.createErr
 	}
+	if m.createdPaths != nil {
+		m.createdPaths[path] = true
+	}
 	return &mockWriteCloser{buf: &strings.Builder{}}, nil
 }
 
@@ -82,6 +93,38 @@ func (m *mockSFTPService) MkdirAll(path string) error {
 func (m *mockSFTPService) WalkDir(path string) ([]string, error) {
 	return nil, nil
 }
+
+func (m *mockSFTPService) Stat(path string) (os.FileInfo, error) {
+	if m.statErr != nil {
+		return nil, m.statErr
+	}
+	if m.statFile != nil {
+		return m.statFile, nil
+	}
+	// If path is in createdPaths, return a mock FileInfo
+	if m.createdPaths != nil && m.createdPaths[path] {
+		return &mockFileInfo{name: filepath.Base(path)}, nil
+	}
+	return nil, os.ErrNotExist
+}
+
+func (m *mockSFTPService) Remove(path string) error {
+	m.removedPaths = append(m.removedPaths, path)
+	return nil
+}
+
+// mockFileInfo is a minimal os.FileInfo implementation for testing.
+type mockFileInfo struct {
+	name string
+	size int64
+}
+
+func (m *mockFileInfo) Name() string       { return m.name }
+func (m *mockFileInfo) Size() int64        { return m.size }
+func (m *mockFileInfo) Mode() os.FileMode  { return 0o644 }
+func (m *mockFileInfo) ModTime() time.Time { return time.Time{} }
+func (m *mockFileInfo) IsDir() bool        { return false }
+func (m *mockFileInfo) Sys() interface{}   { return nil }
 
 // mockWriteCloser is a simple io.WriteCloser that writes to a strings.Builder.
 type mockWriteCloser struct {
@@ -109,7 +152,7 @@ func TestNew(t *testing.T) {
 // TestUploadFile_LocalFileNotFound verifies error when source file does not exist.
 func TestUploadFile_LocalFileNotFound(t *testing.T) {
 	svc := New(newTestLogger(), &mockSFTPService{})
-	err := svc.UploadFile(context.Background(), "/nonexistent/path/file.txt", "/remote/file.txt", nil)
+	err := svc.UploadFile(context.Background(), "/nonexistent/path/file.txt", "/remote/file.txt", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent local file, got nil")
 	}
@@ -132,7 +175,7 @@ func TestUploadFile_RemoteCreateError(t *testing.T) {
 		createErr: errors.New("permission denied"),
 	}
 	svc := New(newTestLogger(), mock)
-	err := svc.UploadFile(context.Background(), localFile, "/remote/file.txt", nil)
+	err := svc.UploadFile(context.Background(), localFile, "/remote/file.txt", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for remote create failure, got nil")
 	}
@@ -151,7 +194,7 @@ func TestDownloadFile_RemoteOpenError(t *testing.T) {
 		openErr:   errors.New("file not found"),
 	}
 	svc := New(newTestLogger(), mock)
-	err := svc.DownloadFile(context.Background(), "/remote/missing.txt", localFile, nil)
+	err := svc.DownloadFile(context.Background(), "/remote/missing.txt", localFile, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for remote open failure, got nil")
 	}
@@ -179,7 +222,7 @@ func TestUploadFile_ProgressCallback(t *testing.T) {
 	err := svc.UploadFile(context.Background(), localFile, "/remote/upload.txt", func(p domain.TransferProgress) {
 		progressCount++
 		lastDone = p.Done
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +245,7 @@ func TestUploadDir_EmptyDirectory(t *testing.T) {
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
 
-	failed, err := svc.UploadDir(context.Background(), emptyDir, "/remote/empty", nil)
+	failed, err := svc.UploadDir(context.Background(), emptyDir, "/remote/empty", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,7 +261,7 @@ func TestDownloadDir_EmptyRemote(t *testing.T) {
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
 
-	failed, err := svc.DownloadDir(context.Background(), "/remote/empty", tmpDir, nil)
+	failed, err := svc.DownloadDir(context.Background(), "/remote/empty", tmpDir, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -246,7 +289,7 @@ func TestUploadFile_ContextCanceled(t *testing.T) {
 
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
-	err := svc.UploadFile(ctx, localFile, "/remote/largefile.bin", nil)
+	err := svc.UploadFile(ctx, localFile, "/remote/largefile.bin", nil, nil)
 	if err != context.Canceled {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
@@ -267,7 +310,7 @@ func TestDownloadFile_ContextCanceled(t *testing.T) {
 	cancel() // Cancel immediately
 
 	svc := New(newTestLogger(), mock)
-	err := svc.DownloadFile(ctx, "/remote/largefile.bin", localFile, nil)
+	err := svc.DownloadFile(ctx, "/remote/largefile.bin", localFile, nil, nil)
 	if err != context.Canceled {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
@@ -294,7 +337,7 @@ func TestUploadDir_ContextCanceled(t *testing.T) {
 
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
-	failed, err := svc.UploadDir(ctx, dir, "/remote/upload_dir", nil)
+	failed, err := svc.UploadDir(ctx, dir, "/remote/upload_dir", nil, nil)
 	if err != context.Canceled {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
@@ -317,7 +360,7 @@ func TestDownloadDir_ContextCanceled(t *testing.T) {
 
 	svc := New(newTestLogger(), mock)
 	// WalkDir returns nil for this mock, so no files to download
-	failed, err := svc.DownloadDir(ctx, "/remote/empty_dir", tmpDir, nil)
+	failed, err := svc.DownloadDir(ctx, "/remote/empty_dir", tmpDir, nil, nil)
 	// With empty WalkDir, no cancellation occurs — returns normally
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -344,11 +387,149 @@ func TestUploadFile_NormalCompletion(t *testing.T) {
 		if p.Done {
 			doneReceived = true
 		}
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !doneReceived {
 		t.Error("expected Done=true progress callback")
+	}
+}
+
+// TestUploadFile_ConflictSkip verifies that UploadFile skips when onConflict returns ConflictSkip.
+func TestUploadFile_ConflictSkip(t *testing.T) {
+	tmpDir := t.TempDir()
+	localFile := filepath.Join(tmpDir, "testfile.txt")
+	if err := os.WriteFile(localFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockSFTPService{
+		connected:    true,
+		statFile:     &mockFileInfo{name: "testfile.txt"},
+		createdPaths: make(map[string]bool),
+	}
+	svc := New(newTestLogger(), mock)
+
+	err := svc.UploadFile(context.Background(), localFile, "/remote/testfile.txt", nil, func(fileName string) (domain.ConflictAction, string) {
+		return domain.ConflictSkip, ""
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on skip, got: %v", err)
+	}
+	if mock.createdPaths["/remote/testfile.txt"] {
+		t.Error("expected file NOT to be created when skipped")
+	}
+}
+
+// TestUploadFile_ConflictOverwrite verifies that UploadFile proceeds when onConflict returns ConflictOverwrite.
+func TestUploadFile_ConflictOverwrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	localFile := filepath.Join(tmpDir, "testfile.txt")
+	if err := os.WriteFile(localFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockSFTPService{
+		connected:    true,
+		statFile:     &mockFileInfo{name: "testfile.txt"},
+		createdPaths: make(map[string]bool),
+	}
+	svc := New(newTestLogger(), mock)
+
+	err := svc.UploadFile(context.Background(), localFile, "/remote/testfile.txt", nil, func(fileName string) (domain.ConflictAction, string) {
+		return domain.ConflictOverwrite, ""
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on overwrite, got: %v", err)
+	}
+	if !mock.createdPaths["/remote/testfile.txt"] {
+		t.Error("expected file to be created when overwrite chosen")
+	}
+}
+
+// TestUploadFile_ConflictRename verifies that UploadFile uses new path when onConflict returns ConflictRename.
+func TestUploadFile_ConflictRename(t *testing.T) {
+	tmpDir := t.TempDir()
+	localFile := filepath.Join(tmpDir, "testfile.txt")
+	if err := os.WriteFile(localFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockSFTPService{
+		connected:    true,
+		statFile:     &mockFileInfo{name: "testfile.txt"},
+		createdPaths: make(map[string]bool),
+	}
+	svc := New(newTestLogger(), mock)
+
+	err := svc.UploadFile(context.Background(), localFile, "/remote/testfile.txt", nil, func(fileName string) (domain.ConflictAction, string) {
+		return domain.ConflictRename, "/remote/testfile.1.txt"
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on rename, got: %v", err)
+	}
+	if !mock.createdPaths["/remote/testfile.1.txt"] {
+		t.Error("expected file to be created at renamed path")
+	}
+}
+
+// TestUploadFile_CancelCleanup verifies D-04: partial remote file is cleaned up on cancel.
+func TestUploadFile_CancelCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	localFile := filepath.Join(tmpDir, "large.bin")
+	content := make([]byte, 128*1024)
+	for i := range content {
+		content[i] = byte(i % 256)
+	}
+	if err := os.WriteFile(localFile, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mock := &mockSFTPService{
+		connected:    true,
+		createdPaths: make(map[string]bool),
+	}
+	svc := New(newTestLogger(), mock)
+
+	err := svc.UploadFile(ctx, localFile, "/remote/large.bin", nil, nil)
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	found := false
+	for _, p := range mock.removedPaths {
+		if p == "/remote/large.bin" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected sftp.Remove to be called for partial file cleanup")
+	}
+}
+
+// TestDownloadFile_CancelCleanup verifies D-04: partial local file is cleaned up on cancel.
+func TestDownloadFile_CancelCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	localFile := filepath.Join(tmpDir, "download.bin")
+
+	mock := &mockSFTPService{
+		connected: true,
+		openData:  make([]byte, 128*1024),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc := New(newTestLogger(), mock)
+	err := svc.DownloadFile(ctx, "/remote/large.bin", localFile, nil, nil)
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	if _, err := os.Stat(localFile); !os.IsNotExist(err) {
+		t.Error("expected partial local file to be deleted after cancel")
 	}
 }
