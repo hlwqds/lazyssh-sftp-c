@@ -141,7 +141,13 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 		}
 		return context.Canceled
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Set standard file permissions on downloaded file (cross-platform)
+	setFilePermissions(localPath, 0o644, ts.log)
+	return nil
 }
 
 // UploadDir recursively uploads a directory from local to remote.
@@ -414,7 +420,13 @@ func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, l
 		}
 		return context.Canceled
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Set standard file permissions on downloaded file (cross-platform)
+	setFilePermissions(localPath, 0o644, ts.log)
+	return nil
 }
 
 // copyWithProgress copies data from src to dst using a 32KB buffer,

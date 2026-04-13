@@ -533,3 +533,15 @@ func TestDownloadFile_CancelCleanup(t *testing.T) {
 		t.Error("expected partial local file to be deleted after cancel")
 	}
 }
+
+// TestSetFilePermissionsExists verifies setFilePermissions is available
+// (build tags will select the correct implementation per platform).
+func TestSetFilePermissionsExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "perm_test.txt")
+	if err := os.WriteFile(tmpFile, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Calling setFilePermissions should not panic or error
+	setFilePermissions(tmpFile, 0o755, newTestLogger())
+}
