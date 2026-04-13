@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### File Browsing
 
 - [x] **BROW-01**: User can browse local directories with file list display (name, size, date, permissions)
-- [ ] **BROW-02**: User can browse remote directories via SFTP with file list display
+- [x] **BROW-02**: User can browse remote directories via SFTP with file list display
 - [x] **BROW-03**: User can navigate to parent directory (../) in both panes
 - [x] **BROW-04**: User can toggle hidden file visibility in both panes
 - [x] **BROW-05**: User can see current path displayed for both local and remote panes
@@ -33,7 +33,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **UI-03**: User can navigate files with arrow keys and j/k
 - [x] **UI-04**: User can select multiple files with Space key
 - [x] **UI-05**: User can switch pane focus with Tab key
-- [ ] **UI-06**: User can initiate transfer with Enter key on selected file(s)
+- [x] **UI-06**: User can initiate transfer with Enter key on selected file(s)
 - [x] **UI-07**: User sees status bar with connection info and transfer status
 - [x] **UI-08**: User sees error messages displayed clearly in the UI
 
@@ -74,7 +74,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | BROW-01 | Phase 1 | Complete |
-| BROW-02 | Phase 2 | Pending |
+| BROW-02 | Phase 2 | Complete |
 | BROW-03 | Phase 1 | Complete |
 | BROW-04 | Phase 1 | Complete |
 | BROW-05 | Phase 1 | Complete |
@@ -91,7 +91,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | UI-03 | Phase 1 | Complete |
 | UI-04 | Phase 1 | Complete |
 | UI-05 | Phase 1 | Complete |
-| UI-06 | Phase 2 | Pending |
+| UI-06 | Phase 2 | Complete |
 | UI-07 | Phase 1 | Complete |
 | UI-08 | Phase 1 | Complete |
 | INTG-01 | Phase 1 | Complete |
