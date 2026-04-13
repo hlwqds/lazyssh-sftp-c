@@ -91,10 +91,8 @@ func TestListDir_DirectoriesBeforeFiles(t *testing.T) {
 	for i, e := range entries {
 		if e.IsDir {
 			lastDirIdx = i
-		} else {
-			if i < firstFileIdx {
-				firstFileIdx = i
-			}
+		} else if i < firstFileIdx {
+			firstFileIdx = i
 		}
 	}
 

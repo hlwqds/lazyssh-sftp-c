@@ -60,7 +60,7 @@ func (c *SFTPClient) Connect(server domain.Server) error {
 
 	c.log.Infow("starting SFTP connection", "host", server.Host, "alias", server.Alias)
 
-	cmd := exec.Command("ssh", args...)
+	cmd := exec.Command("ssh", args...) //nolint:gosec // G204: args from Server entity, not user input
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("create stdout pipe: %w", err)
@@ -340,12 +340,12 @@ func sftpSortSlice(entries []domain.FileInfo, sortField domain.FileSortField, so
 	sort.SliceStable(entries, func(i, j int) bool {
 		var less bool
 		switch sortField {
+		case domain.SortByName:
+			less = strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 		case domain.SortBySize:
 			less = entries[i].Size < entries[j].Size
 		case domain.SortByDate:
 			less = entries[i].ModTime.Before(entries[j].ModTime)
-		default: // SortByName
-			less = strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 		}
 		if sortAsc {
 			return less

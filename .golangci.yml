@@ -74,6 +74,14 @@ linters-settings:
       - unnamedResult
       - whyNoLint
       - hugeParam
+      - ifElseChain
+      - singleCaseSwitch
+
+  unparam:
+    # tview draw methods follow the Draw(screen, x, y, width, height) API signature
+    exclude-functions:
+      - '.*\.drawProgress'
+      - '.*\.drawConflictDialog'
 
 
   goheader:

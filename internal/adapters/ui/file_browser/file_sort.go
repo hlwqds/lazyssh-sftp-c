@@ -15,7 +15,6 @@
 package file_browser
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
@@ -66,6 +65,8 @@ func (m FileSortMode) Ascending() bool {
 	switch m {
 	case FileSortByNameAsc, FileSortBySizeAsc, FileSortByDateAsc:
 		return true
+	case FileSortByNameDesc, FileSortBySizeDesc, FileSortByDateDesc:
+		return false
 	default:
 		return false
 	}
@@ -114,55 +115,6 @@ func (m FileSortMode) Reverse() FileSortMode {
 	default:
 		return FileSortByNameAsc
 	}
-}
-
-// sortFileEntries sorts file entries with directories always listed before files.
-// Within each group (dirs, files), entries are sorted by the specified field and direction.
-func sortFileEntries(entries []domain.FileInfo, mode FileSortMode) {
-	field := mode.Field()
-	asc := mode.Ascending()
-
-	// Partition into directories and files
-	var dirs, files []domain.FileInfo
-	for _, e := range entries {
-		if e.IsDir {
-			dirs = append(dirs, e)
-		} else {
-			files = append(files, e)
-		}
-	}
-
-	// Sort each partition
-	sortEntries(dirs, field, asc)
-	sortEntries(files, field, asc)
-
-	// Concatenate: directories first, then files
-	n := 0
-	copy(entries[n:], dirs)
-	n += len(dirs)
-	copy(entries[n:], files)
-}
-
-// sortEntries sorts a slice of FileInfo by the given field and direction.
-func sortEntries(entries []domain.FileInfo, field domain.FileSortField, asc bool) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		a, b := entries[i], entries[j]
-		var less bool
-		switch field {
-		case domain.SortByName:
-			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
-		case domain.SortBySize:
-			less = a.Size < b.Size
-		case domain.SortByDate:
-			less = a.ModTime.Before(b.ModTime)
-		default:
-			less = strings.ToLower(a.Name) < strings.ToLower(b.Name)
-		}
-		if asc {
-			return less
-		}
-		return !less
-	})
 }
 
 // trimError truncates an error message to a maximum length for display.

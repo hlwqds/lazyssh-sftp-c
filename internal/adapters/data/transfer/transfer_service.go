@@ -16,6 +16,7 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,11 +64,11 @@ func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath
 		}
 	}
 
-	localFile, err := os.Open(localPath)
+	localFile, err := os.Open(localPath) //nolint:gosec // G304: path from user file browser selection
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
 	}
-	defer localFile.Close()
+	defer func() { _ = localFile.Close() }()
 
 	stat, err := localFile.Stat()
 	if err != nil {
@@ -81,10 +82,10 @@ func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath
 	}
 
 	err = ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, total, onProgress)
-	remoteFile.Close()
+	_ = remoteFile.Close()
 
 	// D-04: cancel cleanup — delete partial remote file
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		ts.log.Infow("transfer canceled, cleaning up partial file", "path", remotePath)
 		if removeErr := ts.sftp.Remove(remotePath); removeErr != nil {
 			ts.log.Warnw("failed to cleanup partial remote file", "path", remotePath, "error", removeErr)
@@ -118,23 +119,23 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
 	}
-	defer remoteFile.Close()
+	defer func() { _ = remoteFile.Close() }()
 
 	// Create parent directory if needed
-	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o750); err != nil {
 		return fmt.Errorf("mkdir local %s: %w", filepath.Dir(localPath), err)
 	}
 
-	localFile, err := os.Create(localPath)
+	localFile, err := os.Create(localPath) //nolint:gosec // G304: path from user file browser selection
 	if err != nil {
 		return fmt.Errorf("create local %s: %w", localPath, err)
 	}
 
 	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, onProgress)
-	localFile.Close()
+	_ = localFile.Close()
 
 	// D-04: cancel cleanup — delete partial local file
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		ts.log.Infow("transfer canceled, cleaning up partial file", "path", localPath)
 		if removeErr := os.Remove(localPath); removeErr != nil {
 			ts.log.Warnw("failed to cleanup partial local file", "path", localPath, "error", removeErr)
@@ -216,7 +217,7 @@ func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath 
 		}
 
 		if err := ts.uploadSingleFile(ctx, path, remoteFile, onProgress, fileIndex, fileCount, onConflict); err != nil {
-			if err == context.Canceled {
+			if errors.Is(err, context.Canceled) {
 				return context.Canceled
 			}
 			ts.log.Warnw("upload failed", "file", path, "error", err)
@@ -235,7 +236,7 @@ func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath 
 		return nil
 	})
 
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		return failed, context.Canceled
 	}
 	if err != nil {
@@ -264,7 +265,7 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 	}
 
 	// Create local root directory
-	if err := os.MkdirAll(localPath, 0o755); err != nil {
+	if err := os.MkdirAll(localPath, 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir local %s: %w", localPath, err)
 	}
 
@@ -283,7 +284,7 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 		localFile := filepath.Join(localPath, filepath.FromSlash(rel))
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(localFile), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(localFile), 0o750); err != nil {
 			ts.log.Warnw("failed to create local parent dir", "dir", filepath.Dir(localFile), "error", err)
 			failed = append(failed, remoteFile)
 			if onProgress != nil {
@@ -300,7 +301,7 @@ func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPat
 		}
 
 		if err := ts.downloadSingleFile(ctx, remoteFile, localFile, onProgress, i+1, fileCount, onConflict); err != nil {
-			if err == context.Canceled {
+			if errors.Is(err, context.Canceled) {
 				return failed, context.Canceled
 			}
 			ts.log.Warnw("download failed", "file", remoteFile, "error", err)
@@ -341,11 +342,11 @@ func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remo
 		}
 	}
 
-	localFile, err := os.Open(localPath)
+	localFile, err := os.Open(localPath) //nolint:gosec // G304: path from user file browser selection
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
 	}
-	defer localFile.Close()
+	defer func() { _ = localFile.Close() }()
 
 	stat, err := localFile.Stat()
 	if err != nil {
@@ -364,10 +365,10 @@ func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remo
 			onProgress(p)
 		}
 	})
-	remoteFile.Close()
+	_ = remoteFile.Close()
 
 	// D-04: cancel cleanup
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		if removeErr := ts.sftp.Remove(remotePath); removeErr != nil {
 			ts.log.Warnw("failed to cleanup partial remote file", "path", remotePath, "error", removeErr)
 		}
@@ -397,9 +398,9 @@ func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, l
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
 	}
-	defer remoteFile.Close()
+	defer func() { _ = remoteFile.Close() }()
 
-	localFile, err := os.Create(localPath)
+	localFile, err := os.Create(localPath) //nolint:gosec // G304: path from user file browser selection
 	if err != nil {
 		return fmt.Errorf("create local %s: %w", localPath, err)
 	}
@@ -411,10 +412,10 @@ func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, l
 			onProgress(p)
 		}
 	})
-	localFile.Close()
+	_ = localFile.Close()
 
 	// D-04: cancel cleanup
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		if removeErr := os.Remove(localPath); removeErr != nil {
 			ts.log.Warnw("failed to cleanup partial local file", "path", localPath, "error", removeErr)
 		}
@@ -489,22 +490,4 @@ func joinRemotePath(base, rel string) string {
 		return base + rel
 	}
 	return base + "/" + rel
-}
-
-// nextAvailableName finds a non-conflicting file name by appending incremental suffixes.
-// Format: {stem}.{counter}{extension} (e.g., file.1.txt, file.2.txt).
-// Tries counters 1 through 100. Returns original path if all candidates exist.
-func nextAvailableName(path string, statFunc func(string) (os.FileInfo, error)) string {
-	ext := filepath.Ext(path)
-	name := filepath.Base(path)
-	dir := filepath.Dir(path)
-	stem := name[:len(name)-len(ext)]
-
-	for i := 1; i <= 100; i++ {
-		candidate := filepath.Join(dir, fmt.Sprintf("%s.%d%s", stem, i, ext))
-		if _, err := statFunc(candidate); err != nil {
-			return candidate
-		}
-	}
-	return path
 }

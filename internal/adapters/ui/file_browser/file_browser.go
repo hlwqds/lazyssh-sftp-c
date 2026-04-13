@@ -28,6 +28,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// Direction labels for transfer display.
+const (
+	directionUpload   = "Uploading"
+	directionDownload = "Downloading"
+)
+
 // FileBrowser is the root component for the dual-pane file browser.
 // It is a self-contained tview.Primitive that can be set as root via app.SetRoot().
 // Layout: FlexRow with content (FlexColumn: LocalPane + RemotePane) and StatusBar.
@@ -163,15 +169,6 @@ func (fb *FileBrowser) updateStatusBarConnection(msg string) {
 	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
-// updateStatusBarSelection prepends selection count to the status bar text.
-func (fb *FileBrowser) updateStatusBarSelection(count int) {
-	if count > 0 {
-		fb.statusBar.SetText(fmt.Sprintf("[#FFD700]%d files selected[-]  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back", count))
-	} else {
-		fb.setStatusBarDefault()
-	}
-}
-
 // GetLocalPane returns the local file pane.
 func (fb *FileBrowser) GetLocalPane() *LocalPane {
 	return fb.localPane
@@ -241,9 +238,9 @@ func (fb *FileBrowser) initiateTransfer() {
 	}
 
 	fb.transferring = true
-	direction := "Uploading"
+	direction := directionUpload
 	if fb.activePane == 1 {
-		direction = "Downloading"
+		direction = directionDownload
 	}
 
 	// Create cancellable context for this transfer
@@ -363,9 +360,9 @@ func (fb *FileBrowser) initiateDirTransfer() {
 	}
 
 	fb.transferring = true
-	direction := "Uploading"
+	direction := directionUpload
 	if fb.activePane == 1 {
-		direction = "Downloading"
+		direction = directionDownload
 	}
 
 	// Create cancellable context for this transfer
@@ -485,10 +482,12 @@ func (fb *FileBrowser) buildConflictHandler() domain.ConflictHandler {
 				fb.updateStatusBarTemp(fmt.Sprintf("[#FFA500]Renamed to: %s[-]", baseName))
 			})
 			return action, newPath
-		default:
+		case domain.ConflictOverwrite:
 			fb.app.QueueUpdateDraw(func() {
 				fb.updateStatusBarTemp(fmt.Sprintf("[#FFA500]Overwrote: %s[-]", fileName))
 			})
+			return action, ""
+		default:
 			return action, ""
 		}
 	}

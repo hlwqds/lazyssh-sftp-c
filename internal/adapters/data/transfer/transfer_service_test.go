@@ -290,7 +290,7 @@ func TestUploadFile_ContextCanceled(t *testing.T) {
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
 	err := svc.UploadFile(ctx, localFile, "/remote/largefile.bin", nil, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 }
@@ -311,7 +311,7 @@ func TestDownloadFile_ContextCanceled(t *testing.T) {
 
 	svc := New(newTestLogger(), mock)
 	err := svc.DownloadFile(ctx, "/remote/largefile.bin", localFile, nil, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 }
@@ -338,7 +338,7 @@ func TestUploadDir_ContextCanceled(t *testing.T) {
 	mock := &mockSFTPService{connected: true}
 	svc := New(newTestLogger(), mock)
 	failed, err := svc.UploadDir(ctx, dir, "/remote/upload_dir", nil, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 	// Some files should have been skipped due to cancellation
@@ -496,7 +496,7 @@ func TestUploadFile_CancelCleanup(t *testing.T) {
 	svc := New(newTestLogger(), mock)
 
 	err := svc.UploadFile(ctx, localFile, "/remote/large.bin", nil, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 	found := false
@@ -526,7 +526,7 @@ func TestDownloadFile_CancelCleanup(t *testing.T) {
 
 	svc := New(newTestLogger(), mock)
 	err := svc.DownloadFile(ctx, "/remote/large.bin", localFile, nil, nil)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 	if _, err := os.Stat(localFile); !os.IsNotExist(err) {

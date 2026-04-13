@@ -36,9 +36,6 @@ const (
 
 	// completedColor is the color used when a transfer completes successfully.
 	completedColor = tcell.Color33
-
-	// progressPausedColor is the gray color for paused progress state.
-	progressPausedColor = tcell.Color245
 )
 
 // cancelWarningColor is the gold color for "Cancel transfer?" prompt.
@@ -129,19 +126,19 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	x, y, width, height := tm.GetInnerRect()
 
 	switch tm.mode {
+	case modeProgress:
+		tm.drawProgress(screen, x, y, width, height)
 	case modeCancelConfirm:
 		tm.drawCancelConfirm(screen, x, y, width, height)
 	case modeConflictDialog:
 		tm.drawConflictDialog(screen, x, y, width, height)
 	case modeSummary:
 		tm.drawSummary(screen, x, y, width, height)
-	default:
-		tm.drawProgress(screen, x, y, width, height)
 	}
 }
 
 // drawProgress renders the normal progress display.
-func (tm *TransferModal) drawProgress(screen tcell.Screen, x, y, width, height int) {
+func (tm *TransferModal) drawProgress(screen tcell.Screen, x, y, width, _ int) {
 	// Row 1: file name label
 	row1 := y + 1
 	tview.Print(screen, tm.fileLabel, x, row1, width, tview.AlignCenter, tcell.Color255)
@@ -183,7 +180,7 @@ func (tm *TransferModal) drawCancelConfirm(screen tcell.Screen, x, y, width, hei
 
 // drawConflictDialog renders the conflict resolution dialog.
 // Layout per 03-UI-SPEC Mode 3: file info + three options.
-func (tm *TransferModal) drawConflictDialog(screen tcell.Screen, x, y, width, height int) {
+func (tm *TransferModal) drawConflictDialog(screen tcell.Screen, x, y, width, _ int) {
 	row := y + 1
 	tview.Print(screen, "File already exists:", x, row, width, tview.AlignCenter, conflictWarningColor)
 	row++
@@ -378,7 +375,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		return nil // consume all other keys in conflict dialog mode
 
 	case modeCancelConfirm:
-		switch event.Key() {
+		switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 		case tcell.KeyEscape:
 			// D-03: second Esc confirms cancel (same as y/Enter)
 			tm.cancelConfirmed = true
@@ -405,7 +402,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 
 	case modeProgress:
-		switch event.Key() {
+		switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 		case tcell.KeyEscape:
 			tm.ShowCancelConfirm()
 			return nil

@@ -29,7 +29,7 @@ import (
 //     which manages progress->cancelConfirm->summary mode transitions
 //   - Otherwise, close the file browser
 func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
+	switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 	case tcell.KeyTab:
 		fb.switchFocus()
 		return nil
@@ -44,7 +44,6 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		fb.initiateDirTransfer()
 		return nil
 	}
-	//nolint:exhaustive // We only handle specific keys and pass through others
 	switch event.Rune() {
 	case 's':
 		fb.cycleSortField()

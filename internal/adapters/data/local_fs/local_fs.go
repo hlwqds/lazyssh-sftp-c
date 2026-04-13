@@ -101,12 +101,12 @@ func sortSlice(entries []domain.FileInfo, sortField domain.FileSortField, sortAs
 	sort.SliceStable(entries, func(i, j int) bool {
 		var less bool
 		switch sortField {
+		case domain.SortByName:
+			less = strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 		case domain.SortBySize:
 			less = entries[i].Size < entries[j].Size
 		case domain.SortByDate:
 			less = entries[i].ModTime.Before(entries[j].ModTime)
-		default: // SortByName
-			less = strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 		}
 		if sortAsc {
 			return less
