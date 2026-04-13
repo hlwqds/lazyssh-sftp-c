@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 2 context gathered
-last_updated: "2026-04-13T03:56:38.148Z"
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-04-13T05:15:33Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 6
+  completed_plans: 4
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令
-**Current focus:** Phase 01 — foundation
+**Current focus:** Phase 02 — core-transfer
 
 ## Current Position
 
 Phase: 2
-Plan: Not started
-Status: Phase complete — ready for verification
+Plan: 1 of 3
+Status: Executing Phase 02
 Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0%
@@ -72,6 +72,10 @@ Recent decisions affecting current work:
 - [Phase 01]: Dual-pane tview.Flex layout with 50:50 split and event propagation chain
 - [Phase 01]: Unix-style path helpers for remote path manipulation
 - [Phase 01]: Status bar created with separate method calls due to tview.Box return type
+- [Phase 02 P01]: Custom 32KB buffered copy loop for per-chunk progress callbacks instead of io.Copy
+- [Phase 02 P01]: io.ReadCloser for remote file I/O -- download BytesTotal unknown (no Stat on interface)
+- [Phase 02 P01]: Two-pass directory walk for uploads (count then transfer), single WalkDir for downloads
+- [Phase 02 P01]: Partial failure model for directory transfers -- collect failed files, continue remaining
 
 ### Pending Todos
 
@@ -85,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T03:56:38.146Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-core-transfer/02-CONTEXT.md
+Last session: 2026-04-13T05:15:33Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: .planning/phases/02-core-transfer/02-01-SUMMARY.md

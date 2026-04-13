@@ -48,7 +48,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 02-01-PLAN.md — Transfer port & adapter layer: TransferProgress domain type, TransferService interface, SFTPService I/O extensions, TransferService implementation, unit tests
+- [x] 02-01-PLAN.md — Transfer port & adapter layer: TransferProgress domain type, TransferService interface, SFTPService I/O extensions, TransferService implementation, unit tests
 - [ ] 02-02-PLAN.md — Transfer progress modal: ProgressBar renderer, TransferModal component with progress bar, speed, ETA
 - [ ] 02-03-PLAN.md — Wire transfers into file browser: Enter key file transfer, F5 directory transfer, auto-refresh, DI wiring
 
@@ -69,6 +69,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/3 | Complete    | 2026-04-13 |
-| 2. Core Transfer | 0/3 | Planned | - |
+| 1. Foundation | 3/3 | Complete    | 2026-04-13 |
+| 2. Core Transfer | 1/3 | Executing | - |
 | 3. Polish | 0/? | Not started | - |
