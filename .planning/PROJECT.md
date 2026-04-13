@@ -34,8 +34,14 @@
 
 ### Active
 
-- [ ] 文件冲突处理（覆盖/跳过/重命名询问）
-- [ ] 传输取消（中途取消正在进行的传输）
+(无 — 所有需求已实现)
+
+### Validated in Phase 3: polish
+
+- ✓ 文件冲突处理（覆盖/跳过/重命名询问）— Validated in Phase 3: polish
+- ✓ 传输取消（中途取消正在进行的传输）— Validated in Phase 3: polish
+- ✓ 跨平台文件权限（Windows/macOS/Linux）— Validated in Phase 3: polish
+- ✓ 取消后部分文件清理（D-04）— Validated in Phase 3: polish
 
 ### Out of Scope
 
