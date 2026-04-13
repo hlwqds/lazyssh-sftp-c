@@ -92,16 +92,17 @@ Deferred to future release. Tracked but not in current roadmap.
 | UI-04 | Phase 1 | Pending |
 | UI-05 | Phase 1 | Pending |
 | UI-06 | Phase 2 | Pending |
+| UI-07 | Phase 1 | Pending |
 | UI-08 | Phase 1 | Pending |
 | INTG-01 | Phase 1 | Pending |
 | INTG-02 | Phase 1 | Pending |
 | INTG-03 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 20 total
-- Mapped to phases: 20
-- Unmapped: 0 ✓
+- v1 requirements: 24 total
+- Mapped to phases: 24
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-13*
-*Last updated: 2026-04-13 after initial definition*
+*Last updated: 2026-04-13 after roadmap creation*
