@@ -15,6 +15,7 @@
 package ports
 
 import (
+	"io"
 	"reflect"
 	"testing"
 
@@ -43,6 +44,22 @@ func (m *mockSFTPService) Close() error {
 
 func (m *mockSFTPService) IsConnected() bool {
 	return false
+}
+
+func (m *mockSFTPService) CreateRemoteFile(path string) (io.WriteCloser, error) {
+	return nil, nil
+}
+
+func (m *mockSFTPService) OpenRemoteFile(path string) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (m *mockSFTPService) MkdirAll(path string) error {
+	return nil
+}
+
+func (m *mockSFTPService) WalkDir(path string) ([]string, error) {
+	return nil, nil
 }
 
 // TestFileServiceInterface verifies FileService interface exists and has correct methods.
@@ -75,7 +92,7 @@ func TestSFTPServiceInterface(t *testing.T) {
 	}
 
 	// SFTPService should have its own methods
-	for _, method := range []string{"Connect", "Close", "IsConnected"} {
+	for _, method := range []string{"Connect", "Close", "IsConnected", "CreateRemoteFile", "OpenRemoteFile", "MkdirAll", "WalkDir"} {
 		_, ok := sftpType.MethodByName(method)
 		if !ok {
 			t.Errorf("SFTPService interface missing %s method", method)
