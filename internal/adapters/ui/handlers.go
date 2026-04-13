@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
+	"github.com/Adembc/lazyssh/internal/adapters/ui/file_browser"
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -82,6 +83,9 @@ func (t *tui) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case 'f':
 		t.handlePortForward()
+		return nil
+	case 'F':
+		t.handleFileBrowser()
 		return nil
 	case 'x':
 		t.handleStopForwarding()
@@ -345,6 +349,26 @@ func (t *tui) handleRefreshBackground() {
 			t.showStatusTemp(fmt.Sprintf("Refreshed %d servers", len(servers)))
 		})
 	}(currentIdx, query)
+}
+
+func (t *tui) handleFileBrowser() {
+	server, ok := t.serverList.GetSelectedServer()
+	if !ok {
+		t.showStatusTempColor("No server selected", "#FF6B6B")
+		return
+	}
+
+	fb := file_browser.NewFileBrowser(
+		t.app,
+		t.logger,
+		t.fileService,
+		t.sftpService,
+		server,
+		func() {
+			t.returnToMain()
+		},
+	)
+	t.app.SetRoot(fb, true)
 }
 
 // =============================================================================
