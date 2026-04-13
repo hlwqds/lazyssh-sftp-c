@@ -192,6 +192,101 @@ func (c *SFTPClient) ListDir(path string, showHidden bool, sortField domain.File
 	return result, nil
 }
 
+// CreateRemoteFile creates a new remote file for writing.
+func (c *SFTPClient) CreateRemoteFile(path string) (io.WriteCloser, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected: call Connect first")
+	}
+	f, err := client.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("sftp create %s: %w", path, err)
+	}
+	return f, nil
+}
+
+// OpenRemoteFile opens an existing remote file for reading.
+func (c *SFTPClient) OpenRemoteFile(path string) (io.ReadCloser, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected: call Connect first")
+	}
+	f, err := client.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("sftp open %s: %w", path, err)
+	}
+	return f, nil
+}
+
+// MkdirAll creates remote directories recursively, skipping existing ones.
+func (c *SFTPClient) MkdirAll(path string) error {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return fmt.Errorf("not connected: call Connect first")
+	}
+
+	// Normalize path and build from root
+	path = strings.TrimRight(path, "/")
+	parts := strings.Split(path, "/")
+	for i := 2; i <= len(parts); i++ {
+		p := strings.Join(parts[:i], "/")
+		if err := client.Mkdir(p); err != nil {
+			// Ignore "already exists" errors
+			if !strings.Contains(err.Error(), "exists") {
+				return fmt.Errorf("sftp mkdir %s: %w", p, err)
+			}
+		}
+	}
+	return nil
+}
+
+// WalkDir returns all file paths (not directories) under the given remote path, recursively.
+func (c *SFTPClient) WalkDir(path string) ([]string, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("not connected: call Connect first")
+	}
+	var files []string
+	if err := c.walkDir(client, path, &files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// walkDir recursively walks remote directory, appending file paths to files.
+func (c *SFTPClient) walkDir(client *sftp.Client, path string, files *[]string) error {
+	entries, err := client.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("sftp readdir %s: %w", path, err)
+	}
+	for _, e := range entries {
+		if e.Name() == "." || e.Name() == ".." {
+			continue
+		}
+		fullPath := path + "/" + e.Name()
+		if e.IsDir() {
+			if err := c.walkDir(client, fullPath, files); err != nil {
+				return err
+			}
+		} else {
+			*files = append(*files, fullPath)
+		}
+	}
+	return nil
+}
+
 // sortSFTPEntries sorts file entries with directories first, then by the specified field.
 func sortSFTPEntries(entries []domain.FileInfo, sortField domain.FileSortField, sortAsc bool) {
 	var dirs, files []domain.FileInfo
