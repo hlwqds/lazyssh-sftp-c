@@ -38,6 +38,7 @@ type RemotePane struct {
 	selected    map[string]bool // multi-select state: file name -> selected
 	connected   bool
 	onPathChange func(path string)
+	onFileAction func(fi domain.FileInfo)
 }
 
 // NewRemotePane creates a new RemotePane for browsing remote files.
@@ -106,6 +107,9 @@ func (rp *RemotePane) build() {
 		}
 		fi, ok := ref.(domain.FileInfo)
 		if !ok || !fi.IsDir {
+			if rp.onFileAction != nil {
+				rp.onFileAction(fi)
+			}
 			return
 		}
 		rp.NavigateInto(fi.Name)
@@ -365,6 +369,12 @@ func (rp *RemotePane) SetFocused(focused bool) {
 // OnPathChange sets a callback invoked when the user navigates to a new directory.
 func (rp *RemotePane) OnPathChange(fn func(path string)) *RemotePane {
 	rp.onPathChange = fn
+	return rp
+}
+
+// OnFileAction sets a callback invoked when the user presses Enter on a non-directory file.
+func (rp *RemotePane) OnFileAction(fn func(fi domain.FileInfo)) *RemotePane {
+	rp.onFileAction = fn
 	return rp
 }
 

@@ -33,9 +33,10 @@ type LocalPane struct {
 	fileService ports.FileService
 	currentPath string
 	sortMode    FileSortMode
-	showHidden  bool
-	selected    map[string]bool // multi-select state: file name -> selected
+	showHidden   bool
+	selected     map[string]bool // multi-select state: file name -> selected
 	onPathChange func(path string)
+	onFileAction func(fi domain.FileInfo)
 }
 
 // NewLocalPane creates a new LocalPane for browsing the local filesystem.
@@ -96,6 +97,9 @@ func (lp *LocalPane) build() {
 		}
 		fi, ok := ref.(domain.FileInfo)
 		if !ok || !fi.IsDir {
+			if lp.onFileAction != nil {
+				lp.onFileAction(fi)
+			}
 			return
 		}
 		lp.NavigateInto(fi.Name)
@@ -298,6 +302,12 @@ func (lp *LocalPane) SetFocused(focused bool) {
 // OnPathChange sets a callback invoked when the user navigates to a new directory.
 func (lp *LocalPane) OnPathChange(fn func(path string)) *LocalPane {
 	lp.onPathChange = fn
+	return lp
+}
+
+// OnFileAction sets a callback invoked when the user presses Enter on a non-directory file.
+func (lp *LocalPane) OnFileAction(fn func(fi domain.FileInfo)) *LocalPane {
+	lp.onFileAction = fn
 	return lp
 }
 
