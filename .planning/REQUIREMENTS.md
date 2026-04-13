@@ -28,14 +28,14 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### User Interface
 
-- [ ] **UI-01**: User can open file browser by pressing `F` on a selected server
-- [ ] **UI-02**: User sees dual-pane layout (left=local, right=remote)
-- [ ] **UI-03**: User can navigate files with arrow keys and j/k
-- [ ] **UI-04**: User can select multiple files with Space key
-- [ ] **UI-05**: User can switch pane focus with Tab key
+- [x] **UI-01**: User can open file browser by pressing `F` on a selected server
+- [x] **UI-02**: User sees dual-pane layout (left=local, right=remote)
+- [x] **UI-03**: User can navigate files with arrow keys and j/k
+- [x] **UI-04**: User can select multiple files with Space key
+- [x] **UI-05**: User can switch pane focus with Tab key
 - [ ] **UI-06**: User can initiate transfer with Enter key on selected file(s)
-- [ ] **UI-07**: User sees status bar with connection info and transfer status
-- [ ] **UI-08**: User sees error messages displayed clearly in the UI
+- [x] **UI-07**: User sees status bar with connection info and transfer status
+- [x] **UI-08**: User sees error messages displayed clearly in the UI
 
 ### Integration
 
@@ -86,14 +86,14 @@ Deferred to future release. Tracked but not in current roadmap.
 | TRAN-05 | Phase 2 | Pending |
 | TRAN-06 | Phase 3 | Pending |
 | TRAN-07 | Phase 3 | Pending |
-| UI-01 | Phase 1 | Pending |
-| UI-02 | Phase 1 | Pending |
-| UI-03 | Phase 1 | Pending |
-| UI-04 | Phase 1 | Pending |
-| UI-05 | Phase 1 | Pending |
+| UI-01 | Phase 1 | Complete |
+| UI-02 | Phase 1 | Complete |
+| UI-03 | Phase 1 | Complete |
+| UI-04 | Phase 1 | Complete |
+| UI-05 | Phase 1 | Complete |
 | UI-06 | Phase 2 | Pending |
-| UI-07 | Phase 1 | Pending |
-| UI-08 | Phase 1 | Pending |
+| UI-07 | Phase 1 | Complete |
+| UI-08 | Phase 1 | Complete |
 | INTG-01 | Phase 1 | Complete |
 | INTG-02 | Phase 1 | Complete |
 | INTG-03 | Phase 3 | Pending |
