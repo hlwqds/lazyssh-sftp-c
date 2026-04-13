@@ -363,6 +363,7 @@ func (t *tui) handleFileBrowser() {
 		t.logger,
 		t.fileService,
 		t.sftpService,
+		t.transferService,
 		server,
 		func() {
 			t.returnToMain()

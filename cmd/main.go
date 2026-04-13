@@ -22,6 +22,7 @@ import (
 	"github.com/Adembc/lazyssh/internal/adapters/data/ssh_config_file"
 	"github.com/Adembc/lazyssh/internal/adapters/data/local_fs"
 	"github.com/Adembc/lazyssh/internal/adapters/data/sftp_client"
+	"github.com/Adembc/lazyssh/internal/adapters/data/transfer"
 	"github.com/Adembc/lazyssh/internal/logger"
 
 	"github.com/Adembc/lazyssh/internal/adapters/ui"
@@ -57,7 +58,8 @@ func main() {
 	serverService := services.NewServerService(log, serverRepo)
 	fileService := local_fs.New(log)
 	sftpService := sftp_client.New(log)
-	tui := ui.NewTUI(log, serverService, fileService, sftpService, version, gitCommit)
+	transferService := transfer.New(log, sftpService)
+	tui := ui.NewTUI(log, serverService, fileService, sftpService, transferService, version, gitCommit)
 
 	rootCmd := &cobra.Command{
 		Use:   ui.AppName,

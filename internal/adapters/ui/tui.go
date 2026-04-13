@@ -34,8 +34,9 @@ type tui struct {
 
 	app           *tview.Application
 	serverService ports.ServerService
-	fileService   ports.FileService
-	sftpService   ports.SFTPService
+	fileService     ports.FileService
+	sftpService     ports.SFTPService
+	transferService ports.TransferService
 
 	header     *AppHeader
 	searchBar  *SearchBar
@@ -50,15 +51,16 @@ type tui struct {
 	sortMode SortMode
 }
 
-func NewTUI(logger *zap.SugaredLogger, ss ports.ServerService, fs ports.FileService, sftp ports.SFTPService, version, commit string) App {
+func NewTUI(logger *zap.SugaredLogger, ss ports.ServerService, fs ports.FileService, sftp ports.SFTPService, ts ports.TransferService, version, commit string) App {
 	return &tui{
-		logger:        logger,
-		app:           tview.NewApplication(),
-		serverService: ss,
-		fileService:   fs,
-		sftpService:   sftp,
-		version:       version,
-		commit:        commit,
+		logger:          logger,
+		app:             tview.NewApplication(),
+		serverService:   ss,
+		fileService:     fs,
+		sftpService:     sftp,
+		transferService: ts,
+		version:         version,
+		commit:          commit,
 	}
 }
 

@@ -30,16 +30,19 @@ import (
 // Layout: FlexRow with content (FlexColumn: LocalPane + RemotePane) and StatusBar.
 type FileBrowser struct {
 	*tview.Flex
-	app         *tview.Application
-	log         *zap.SugaredLogger
-	fileService ports.FileService
-	sftpService ports.SFTPService
-	server      domain.Server
-	localPane   *LocalPane
-	remotePane  *RemotePane
-	statusBar   *tview.TextView
-	activePane  int // 0 = local, 1 = remote
-	onClose     func()
+	app           *tview.Application
+	log           *zap.SugaredLogger
+	fileService   ports.FileService
+	sftpService   ports.SFTPService
+	transferSvc   ports.TransferService
+	server        domain.Server
+	localPane     *LocalPane
+	remotePane    *RemotePane
+	statusBar     *tview.TextView
+	transferModal *TransferModal
+	activePane    int // 0 = local, 1 = remote
+	transferring  bool
+	onClose       func()
 }
 
 // NewFileBrowser creates a new FileBrowser with dual-pane layout.
@@ -48,6 +51,7 @@ func NewFileBrowser(
 	log *zap.SugaredLogger,
 	fs ports.FileService,
 	sftp ports.SFTPService,
+	ts ports.TransferService,
 	server domain.Server,
 	onClose func(),
 ) *FileBrowser {
@@ -57,6 +61,7 @@ func NewFileBrowser(
 		log:         log,
 		fileService: fs,
 		sftpService: sftp,
+		transferSvc: ts,
 		server:      server,
 		onClose:     onClose,
 	}
