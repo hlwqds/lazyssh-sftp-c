@@ -145,18 +145,18 @@ func (fb *FileBrowser) build() {
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
 func (fb *FileBrowser) setStatusBarDefault() {
-	fb.statusBar.SetText("[white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]Esc[-] Back")
+	fb.statusBar.SetText("[white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status to the status bar text.
 func (fb *FileBrowser) updateStatusBarConnection(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarSelection prepends selection count to the status bar text.
 func (fb *FileBrowser) updateStatusBarSelection(count int) {
 	if count > 0 {
-		fb.statusBar.SetText(fmt.Sprintf("[#FFD700]%d files selected[-]  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]Esc[-] Back", count))
+		fb.statusBar.SetText(fmt.Sprintf("[#FFD700]%d files selected[-]  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back", count))
 	} else {
 		fb.setStatusBarDefault()
 	}
@@ -385,5 +385,5 @@ func (fb *FileBrowser) initiateDirTransfer() {
 
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }

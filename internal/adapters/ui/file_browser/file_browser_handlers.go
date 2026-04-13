@@ -29,7 +29,14 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		fb.switchFocus()
 		return nil
 	case tcell.KeyESC:
+		if fb.transferModal != nil && fb.transferModal.IsVisible() {
+			fb.transferModal.Hide()
+			return nil
+		}
 		fb.close()
+		return nil
+	case tcell.KeyF5:
+		fb.initiateDirTransfer()
 		return nil
 	}
 	//nolint:exhaustive // We only handle specific keys and pass through others
