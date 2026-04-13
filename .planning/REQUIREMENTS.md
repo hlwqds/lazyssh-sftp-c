@@ -41,7 +41,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **INTG-01**: File browser uses existing SSH config from selected server (zero-config)
 - [x] **INTG-02**: SFTP connection established via system SSH binary (respects ~/.ssh/config, ssh-agent)
-- [ ] **INTG-03**: File browser works on Linux, Windows, and macOS
+- [x] **INTG-03**: File browser works on Linux, Windows, and macOS
 
 ## v2 Requirements
 
@@ -96,7 +96,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | UI-08 | Phase 1 | Complete |
 | INTG-01 | Phase 1 | Complete |
 | INTG-02 | Phase 1 | Complete |
-| INTG-03 | Phase 3 | Pending |
+| INTG-03 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 24 total
