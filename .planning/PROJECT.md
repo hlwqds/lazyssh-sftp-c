@@ -23,25 +23,22 @@
 - ✓ 标签管理 — existing
 - ✓ 密钥自动补全 — existing
 - ✓ 跨平台支持（Linux/Windows/Darwin）— existing
-- ✓ 双栏文件浏览器 UI（左侧本地、右侧远程）— Validated in Phase 1: foundation
-- ✓ 本地文件/目录浏览（遍历本地文件系统）— Validated in Phase 1: foundation
-- ✓ 快捷键入口（在服务器列表按 F 键触发）— Validated in Phase 1: foundation
-- ✓ 远程文件/目录浏览（通过 SFTP 列出远程目录）— Validated in Phase 2: core-transfer
-- ✓ 文件上传（本地→远程）— Validated in Phase 2: core-transfer
-- ✓ 文件下载（远程→本地）— Validated in Phase 2: core-transfer
-- ✓ 目录递归传输（支持整个目录上传/下载）— Validated in Phase 2: core-transfer
-- ✓ 传输进度显示（进度条、速度、剩余时间）— Validated in Phase 2: core-transfer
+- ✓ 双栏文件浏览器 UI（左侧本地、右侧远程）— v1.0
+- ✓ 本地文件/目录浏览（遍历本地文件系统）— v1.0
+- ✓ 快捷键入口（在服务器列表按 F 键触发）— v1.0
+- ✓ 远程文件/目录浏览（通过 SFTP 列出远程目录）— v1.0
+- ✓ 文件上传（本地→远程）— v1.0
+- ✓ 文件下载（远程→本地）— v1.0
+- ✓ 目录递归传输（支持整个目录上传/下载）— v1.0
+- ✓ 传输进度显示（进度条、速度、剩余时间）— v1.0
+- ✓ 文件冲突处理（覆盖/跳过/重命名询问）— v1.0
+- ✓ 传输取消（中途取消正在进行的传输）— v1.0
+- ✓ 跨平台文件权限（Windows/macOS/Linux）— v1.0
+- ✓ 取消后部分文件清理（D-04）— v1.0
 
 ### Active
 
-(无 — 所有需求已实现)
-
-### Validated in Phase 3: polish
-
-- ✓ 文件冲突处理（覆盖/跳过/重命名询问）— Validated in Phase 3: polish
-- ✓ 传输取消（中途取消正在进行的传输）— Validated in Phase 3: polish
-- ✓ 跨平台文件权限（Windows/macOS/Linux）— Validated in Phase 3: polish
-- ✓ 取消后部分文件清理（D-04）— Validated in Phase 3: polish
+(无 — v1.0 所有需求已实现)
 
 ### Out of Scope
 
@@ -53,9 +50,11 @@
 
 ## Context
 
-lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture + 六边形设计。核心依赖 tview/tcell 构建 TUI，通过调用系统 ssh 命令实现连接。现有代码结构清晰，分为 Domain/Ports/Services/Adapters 四层。
+lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture + 六边形设计。核心依赖 tview/tcell 构建 TUI，通过调用系统 ssh 命令实现连接。
 
-文件传输功能是 README 中标记为 "Upcoming" 的功能之一，用户普遍期望在 SSH 管理工具中集成文件传输能力。
+v1.0 已完成文件传输功能：双栏文件浏览器、SFTP 上传/下载、目录递归传输、进度显示、取消支持、冲突处理、跨平台兼容。技术栈 ~14,490 行 Go 代码，23 个单元测试。
+
+文件传输功能是 README 中标记为 "Upcoming" 的功能，现已实现。
 
 ## Constraints
 
@@ -69,12 +68,16 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| 使用系统 scp/sftp 命令 | 与现有 SSH 连接方式一致，不引入新安全风险，跨平台兼容 | Phase 1: pkg/sftp NewClientPipe via system SSH binary |
-| 32KB 缓冲复制循环 | 替代 io.Copy，支持逐块进度回调 | Phase 2: TransferService 使用 32KB buffer + onProgress callback |
-| onFileAction 回调模式 | Pane Enter 事件传递到 FileBrowser 传输编排层 | Phase 2: local/remote pane 回调 → initiateTransfer |
-| 双栏浏览器 UI | 最直观的文件传输体验，类似 FileZilla | Phase 1: tview.Table 50:50 Flex layout |
-| 快捷键 F 触发 | 不改变主界面布局，最小化对现有功能的影响 | Phase 1: case 'F' in handleGlobalKeys |
-| 远程浏览通过 SFTP 子命令 | `sftp` 可用于 ls 等操作，无需 Go SSH 库 | Phase 1: pkg/sftp NewClientPipe via exec.Command("ssh") |
+| 使用系统 scp/sftp 命令 | 与现有 SSH 连接方式一致，不引入新安全风险，跨平台兼容 | ✓ pkg/sftp NewClientPipe via system SSH binary |
+| 32KB 缓冲复制循环 | 替代 io.Copy，支持逐块进度回调 | ✓ TransferService 32KB buffer + onProgress callback |
+| onFileAction 回调模式 | Pane Enter 事件传递到 FileBrowser 传输编排层 | ✓ local/remote pane → initiateTransfer |
+| 双栏浏览器 UI | 最直观的文件传输体验，类似 FileZilla | ✓ tview.Table 50:50 Flex layout |
+| 快捷键 F 触发 | 不改变主界面布局，最小化对现有功能的影响 | ✓ case 'F' in handleGlobalKeys |
+| 远程浏览通过 SFTP 子命令 | `sftp` 可用于 ls 等操作，无需 Go SSH 库 | ✓ pkg/sftp NewClientPipe via exec.Command("ssh") |
+| context.Context 取消传播 | Go 惯用取消模式，32KB chunk 粒度中断 | ✓ TransferService 所有方法接受 ctx 参数 |
+| TransferModal 多模式状态机 | 替代 bool 标志，支持 progress/cancelConfirm/conflictDialog/summary 四种模式 | ✓ modalMode enum + HandleKey dispatch |
+| 冲突处理 channel 同步 | goroutine 中检测冲突后通过 buffered channel 等待 UI 响应 | ✓ buildConflictHandler → actionCh |
+| Build tags 分离平台权限 | Windows 不支持 Unix 权限模型，需要编译时分离 | ✓ permissions_unix.go / permissions_windows.go |
 
 ## Evolution
 
@@ -94,4 +97,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after Phase 2: core-transfer completion*
+*Last updated: 2026-04-13 after v1.0 milestone*
