@@ -14,24 +14,33 @@
 
 package ports
 
-import "github.com/Adembc/lazyssh/internal/core/domain"
+import (
+	"context"
+
+	"github.com/Adembc/lazyssh/internal/core/domain"
+)
 
 // TransferService provides file transfer operations between local filesystem and remote SFTP.
 // Implementations coordinate local os operations with remote SFTPService operations.
+// All methods accept ctx context.Context as first parameter for cancel propagation.
 type TransferService interface {
 	// UploadFile uploads a single file from local to remote.
+	// ctx controls cancellation — returns context.Canceled if ctx is done.
 	// onProgress is called periodically during transfer.
-	UploadFile(localPath, remotePath string, onProgress func(domain.TransferProgress)) error
+	UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error
 
 	// DownloadFile downloads a single file from remote to local.
+	// ctx controls cancellation — returns context.Canceled if ctx is done.
 	// onProgress is called periodically during transfer.
-	DownloadFile(remotePath, localPath string, onProgress func(domain.TransferProgress)) error
+	DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error
 
 	// UploadDir recursively uploads a directory from local to remote.
+	// ctx controls cancellation — stops remaining files if ctx is done.
 	// Returns list of failed file paths (empty = all success).
-	UploadDir(localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error)
+	UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error)
 
 	// DownloadDir recursively downloads a directory from remote to local.
+	// ctx controls cancellation — stops remaining files if ctx is done.
 	// Returns list of failed file paths (empty = all success).
-	DownloadDir(remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error)
+	DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error)
 }

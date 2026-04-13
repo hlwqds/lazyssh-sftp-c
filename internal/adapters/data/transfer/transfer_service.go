@@ -15,6 +15,7 @@
 package transfer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -43,8 +44,9 @@ func New(log *zap.SugaredLogger, sftp ports.SFTPService) *transferService {
 }
 
 // UploadFile uploads a single file from local to remote.
+// ctx controls cancellation — returns context.Canceled if ctx is done.
 // onProgress is called periodically during transfer.
-func (ts *transferService) UploadFile(localPath, remotePath string, onProgress func(domain.TransferProgress)) error {
+func (ts *transferService) UploadFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error {
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
@@ -63,12 +65,18 @@ func (ts *transferService) UploadFile(localPath, remotePath string, onProgress f
 	}
 	defer remoteFile.Close()
 
-	return ts.copyWithProgress(localFile, remoteFile, localPath, localPath, total, onProgress)
+	err = ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, total, onProgress)
+	if err == context.Canceled {
+		ts.log.Infow("transfer canceled", "path", remotePath)
+		return context.Canceled
+	}
+	return err
 }
 
 // DownloadFile downloads a single file from remote to local.
+// ctx controls cancellation — returns context.Canceled if ctx is done.
 // onProgress is called periodically during transfer.
-func (ts *transferService) DownloadFile(remotePath, localPath string, onProgress func(domain.TransferProgress)) error {
+func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error {
 	remoteFile, err := ts.sftp.OpenRemoteFile(remotePath)
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
@@ -88,12 +96,18 @@ func (ts *transferService) DownloadFile(remotePath, localPath string, onProgress
 
 	// Remote file size is not available through io.ReadCloser interface;
 	// pass 0 to indicate unknown size.
-	return ts.copyWithProgress(remoteFile, localFile, remotePath, localPath, 0, onProgress)
+	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, onProgress)
+	if err == context.Canceled {
+		ts.log.Infow("transfer canceled", "path", localPath)
+		return context.Canceled
+	}
+	return err
 }
 
 // UploadDir recursively uploads a directory from local to remote.
+// ctx controls cancellation — stops remaining files if ctx is done.
 // Returns list of failed file paths (empty = all success).
-func (ts *transferService) UploadDir(localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+func (ts *transferService) UploadDir(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error) {
 	// First pass: count total files
 	var fileCount int
 	err := filepath.WalkDir(localPath, func(path string, d fs.DirEntry, err error) error {
@@ -126,6 +140,12 @@ func (ts *transferService) UploadDir(localPath, remotePath string, onProgress fu
 			failed = append(failed, path)
 			return nil
 		}
+
+		// Check for cancellation before processing each file
+		if ctx.Err() != nil {
+			return context.Canceled
+		}
+
 		if d.IsDir() {
 			// Create corresponding remote directory
 			rel, _ := filepath.Rel(localPath, path)
@@ -148,7 +168,10 @@ func (ts *transferService) UploadDir(localPath, remotePath string, onProgress fu
 			}
 		}
 
-		if err := ts.uploadSingleFile(path, remoteFile, onProgress, fileIndex, fileCount); err != nil {
+		if err := ts.uploadSingleFile(ctx, path, remoteFile, onProgress, fileIndex, fileCount); err != nil {
+			if err == context.Canceled {
+				return context.Canceled
+			}
 			ts.log.Warnw("upload failed", "file", path, "error", err)
 			failed = append(failed, path)
 			if onProgress != nil {
@@ -165,6 +188,9 @@ func (ts *transferService) UploadDir(localPath, remotePath string, onProgress fu
 		return nil
 	})
 
+	if err == context.Canceled {
+		return failed, context.Canceled
+	}
 	if err != nil {
 		return failed, fmt.Errorf("upload dir %s: %w", localPath, err)
 	}
@@ -176,8 +202,9 @@ func (ts *transferService) UploadDir(localPath, remotePath string, onProgress fu
 }
 
 // DownloadDir recursively downloads a directory from remote to local.
+// ctx controls cancellation — stops remaining files if ctx is done.
 // Returns list of failed file paths (empty = all success).
-func (ts *transferService) DownloadDir(remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+func (ts *transferService) DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error) {
 	// Get list of all remote files
 	remoteFiles, err := ts.sftp.WalkDir(remotePath)
 	if err != nil {
@@ -197,6 +224,11 @@ func (ts *transferService) DownloadDir(remotePath, localPath string, onProgress 
 	var failed []string
 
 	for i, remoteFile := range remoteFiles {
+		// Check for cancellation before each file
+		if ctx.Err() != nil {
+			return failed, context.Canceled
+		}
+
 		// Calculate local path from remote relative path
 		rel := strings.TrimPrefix(remoteFile, remotePath)
 		rel = strings.TrimPrefix(rel, "/")
@@ -219,7 +251,10 @@ func (ts *transferService) DownloadDir(remotePath, localPath string, onProgress 
 			continue
 		}
 
-		if err := ts.downloadSingleFile(remoteFile, localFile, onProgress, i+1, fileCount); err != nil {
+		if err := ts.downloadSingleFile(ctx, remoteFile, localFile, onProgress, i+1, fileCount); err != nil {
+			if err == context.Canceled {
+				return failed, context.Canceled
+			}
 			ts.log.Warnw("download failed", "file", remoteFile, "error", err)
 			failed = append(failed, remoteFile)
 			if onProgress != nil {
@@ -242,7 +277,7 @@ func (ts *transferService) DownloadDir(remotePath, localPath string, onProgress 
 }
 
 // uploadSingleFile uploads a single file with progress tracking for directory transfers.
-func (ts *transferService) uploadSingleFile(localPath, remotePath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
+func (ts *transferService) uploadSingleFile(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local %s: %w", localPath, err)
@@ -268,11 +303,11 @@ func (ts *transferService) uploadSingleFile(localPath, remotePath string, onProg
 		}
 	}
 
-	return ts.copyWithProgress(localFile, remoteFile, localPath, localPath, stat.Size(), progress)
+	return ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, stat.Size(), progress)
 }
 
 // downloadSingleFile downloads a single file with progress tracking for directory transfers.
-func (ts *transferService) downloadSingleFile(remotePath, localPath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
+func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), fileIndex, fileTotal int) error {
 	remoteFile, err := ts.sftp.OpenRemoteFile(remotePath)
 	if err != nil {
 		return fmt.Errorf("open remote %s: %w", remotePath, err)
@@ -293,17 +328,25 @@ func (ts *transferService) downloadSingleFile(remotePath, localPath string, onPr
 		}
 	}
 
-	return ts.copyWithProgress(remoteFile, localFile, remotePath, localPath, 0, progress)
+	return ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, progress)
 }
 
 // copyWithProgress copies data from src to dst using a 32KB buffer,
-// calling onProgress after each chunk.
-func (ts *transferService) copyWithProgress(src io.Reader, dst io.Writer, srcPath, displayPath string, total int64, onProgress func(domain.TransferProgress)) error {
+// calling onProgress after each chunk. Checks ctx.Done() before each
+// Read to support cancellation with at most 32KB delay.
+func (ts *transferService) copyWithProgress(ctx context.Context, src io.Reader, dst io.Writer, srcPath, displayPath string, total int64, onProgress func(domain.TransferProgress)) error {
 	buf := make([]byte, 32*1024)
 	var transferred int64
 	fileName := filepath.Base(displayPath)
 
 	for {
+		// Check cancellation before each chunk read
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		default:
+		}
+
 		n, readErr := src.Read(buf)
 		if n > 0 {
 			_, writeErr := dst.Write(buf[:n])
