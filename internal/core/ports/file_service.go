@@ -16,6 +16,7 @@ package ports
 
 import (
 	"io"
+	"os"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
 )
@@ -49,4 +50,10 @@ type SFTPService interface {
 	MkdirAll(path string) error
 	// WalkDir returns all file paths (not directories) under the given remote path, recursively.
 	WalkDir(path string) ([]string, error)
+
+	// Stat returns file info for the given remote path.
+	// Returns error if the file does not exist.
+	Stat(path string) (os.FileInfo, error)
+	// Remove deletes the remote file or empty directory.
+	Remove(path string) error
 }

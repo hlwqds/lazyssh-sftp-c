@@ -265,6 +265,29 @@ func (c *SFTPClient) WalkDir(path string) ([]string, error) {
 	return files, nil
 }
 
+// Stat returns file info for the given remote path.
+// Returns error if the file does not exist.
+func (c *SFTPClient) Stat(path string) (os.FileInfo, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil {
+		return nil, fmt.Errorf("not connected: call Connect first")
+	}
+	return client.Stat(path)
+}
+
+// Remove deletes the remote file or empty directory.
+func (c *SFTPClient) Remove(path string) error {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("not connected: call Connect first")
+	}
+	return client.Remove(path)
+}
+
 // walkDir recursively walks remote directory, appending file paths to files.
 func (c *SFTPClient) walkDir(client *sftp.Client, path string, files *[]string) error {
 	entries, err := client.ReadDir(path)

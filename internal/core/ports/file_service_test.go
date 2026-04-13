@@ -80,8 +80,8 @@ func TestSFTPServiceStat(t *testing.T) {
 		t.Fatal("SFTPService interface missing Stat method")
 	}
 	// Verify Stat signature: Stat(path string) (os.FileInfo, error)
-	if method.Type.NumIn() != 2 { // receiver + path
-		t.Errorf("Stat should have 1 parameter, got %d", method.Type.NumIn()-1)
+	if method.Type.NumIn() != 1 {
+		t.Errorf("Stat should have 1 parameter, got %d", method.Type.NumIn())
 	}
 	if method.Type.NumOut() != 2 {
 		t.Errorf("Stat should have 2 return values, got %d", method.Type.NumOut())
@@ -96,8 +96,8 @@ func TestSFTPServiceRemove(t *testing.T) {
 		t.Fatal("SFTPService interface missing Remove method")
 	}
 	// Verify Remove signature: Remove(path string) error
-	if method.Type.NumIn() != 2 { // receiver + path
-		t.Errorf("Remove should have 1 parameter, got %d", method.Type.NumIn()-1)
+	if method.Type.NumIn() != 1 {
+		t.Errorf("Remove should have 1 parameter, got %d", method.Type.NumIn())
 	}
 	if method.Type.NumOut() != 1 {
 		t.Errorf("Remove should have 1 return value, got %d", method.Type.NumOut())
