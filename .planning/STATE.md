@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 1 context gathered
-last_updated: "2026-04-13T02:42:15.769Z"
-last_activity: 2026-04-13 — Roadmap created
+status: executing
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-04-13T03:28:44.494Z"
+last_activity: 2026-04-13
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令
-**Current focus:** Phase 1 - Foundation
+**Current focus:** Phase 01 — foundation
 
 ## Current Position
 
-Phase: 1 of 3 (Foundation)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-04-13 — Roadmap created
+Phase: 01 (foundation) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 6 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Recent decisions affecting current work:
 - Research: 使用 `pkg/sftp` (NewClientPipe + 系统 SSH binary) 作为传输后端
 - Research: 快捷键使用 `F` (Shift+f)，因为 `f` 已被端口转发占用
 - Research: 进度显示使用自定义 tview primitive，通过 goroutine + QueueUpdateDraw 更新
+- [Phase 01]: Duplicate SSH arg builders in sftp_client/ssh_args.go to avoid circular import with adapters/ui
+- [Phase 01]: Use pkg/sftp NewClientPipe for SFTP connection (D-09)
+- [Phase 01]: FileInfo domain entity as single source of truth for file listing across local and remote
 
 ### Pending Todos
 
@@ -76,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T02:42:15.767Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-foundation/01-CONTEXT.md
+Last session: 2026-04-13T03:28:44.492Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None

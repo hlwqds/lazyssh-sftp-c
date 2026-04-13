@@ -9,12 +9,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### File Browsing
 
-- [ ] **BROW-01**: User can browse local directories with file list display (name, size, date, permissions)
+- [x] **BROW-01**: User can browse local directories with file list display (name, size, date, permissions)
 - [ ] **BROW-02**: User can browse remote directories via SFTP with file list display
-- [ ] **BROW-03**: User can navigate to parent directory (../) in both panes
-- [ ] **BROW-04**: User can toggle hidden file visibility in both panes
-- [ ] **BROW-05**: User can see current path displayed for both local and remote panes
-- [ ] **BROW-06**: User can sort files by name, size, or date in both panes
+- [x] **BROW-03**: User can navigate to parent directory (../) in both panes
+- [x] **BROW-04**: User can toggle hidden file visibility in both panes
+- [x] **BROW-05**: User can see current path displayed for both local and remote panes
+- [x] **BROW-06**: User can sort files by name, size, or date in both panes
 
 ### File Transfer
 
@@ -39,8 +39,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Integration
 
-- [ ] **INTG-01**: File browser uses existing SSH config from selected server (zero-config)
-- [ ] **INTG-02**: SFTP connection established via system SSH binary (respects ~/.ssh/config, ssh-agent)
+- [x] **INTG-01**: File browser uses existing SSH config from selected server (zero-config)
+- [x] **INTG-02**: SFTP connection established via system SSH binary (respects ~/.ssh/config, ssh-agent)
 - [ ] **INTG-03**: File browser works on Linux, Windows, and macOS
 
 ## v2 Requirements
@@ -73,12 +73,12 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROW-01 | Phase 1 | Pending |
+| BROW-01 | Phase 1 | Complete |
 | BROW-02 | Phase 2 | Pending |
-| BROW-03 | Phase 1 | Pending |
-| BROW-04 | Phase 1 | Pending |
-| BROW-05 | Phase 1 | Pending |
-| BROW-06 | Phase 1 | Pending |
+| BROW-03 | Phase 1 | Complete |
+| BROW-04 | Phase 1 | Complete |
+| BROW-05 | Phase 1 | Complete |
+| BROW-06 | Phase 1 | Complete |
 | TRAN-01 | Phase 2 | Pending |
 | TRAN-02 | Phase 2 | Pending |
 | TRAN-03 | Phase 2 | Pending |
@@ -94,8 +94,8 @@ Deferred to future release. Tracked but not in current roadmap.
 | UI-06 | Phase 2 | Pending |
 | UI-07 | Phase 1 | Pending |
 | UI-08 | Phase 1 | Pending |
-| INTG-01 | Phase 1 | Pending |
-| INTG-02 | Phase 1 | Pending |
+| INTG-01 | Phase 1 | Complete |
+| INTG-02 | Phase 1 | Complete |
 | INTG-03 | Phase 3 | Pending |
 
 **Coverage:**

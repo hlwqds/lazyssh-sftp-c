@@ -28,7 +28,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can navigate to parent directory, toggle hidden file visibility, and sort files by name/size/date in both panes
   4. User sees current path displayed for both panes and a status bar showing connection info
   5. User can switch pane focus with Tab, select multiple files with Space, and see clear error messages when operations fail
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [x] 01-01-PLAN.md — Domain types, port interfaces, LocalFS adapter, SFTP client adapter, buildSSHArgs extraction
+- [ ] 01-02-PLAN.md — Dual-pane file browser UI component (local pane, remote pane placeholder, keyboard handlers, status bar)
+- [ ] 01-03-PLAN.md — Wire file browser into existing TUI (F key entry, dependency injection, status bar update)
 
 ### Phase 2: Core Transfer
 **Goal**: Users can browse remote files via SFTP and transfer files and directories between local and remote with progress feedback
@@ -59,6 +64,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/? | Not started | - |
+| 1. Foundation | 0/3 | Planning complete | - |
 | 2. Core Transfer | 0/? | Not started | - |
 | 3. Polish | 0/? | Not started | - |
