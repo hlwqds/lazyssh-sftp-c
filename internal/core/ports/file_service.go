@@ -56,4 +56,7 @@ type SFTPService interface {
 	Stat(path string) (os.FileInfo, error)
 	// Remove deletes the remote file or empty directory.
 	Remove(path string) error
+	// HomeDir returns the remote home directory resolved during Connect().
+	// The path is guaranteed to be absolute (via Getwd/RealPath).
+	HomeDir() string
 }

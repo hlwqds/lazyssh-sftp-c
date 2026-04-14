@@ -153,6 +153,10 @@ func (rp *RemotePane) ShowError(errMsg string) {
 // ShowConnected enables selection and loads the initial directory listing.
 func (rp *RemotePane) ShowConnected() {
 	rp.connected = true
+	// Resolve "." initial path to absolute path so Record() does not filter it.
+	if rp.currentPath == "." {
+		rp.currentPath = rp.sftpService.HomeDir()
+	}
 	rp.SetSelectable(true, false)
 	rp.Refresh()
 }
