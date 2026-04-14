@@ -106,6 +106,14 @@ func (fb *FileBrowser) build() {
 	// Create recent directories tracker (Phase 4: data layer, Phase 5: popup UI)
 	fb.recentDirs = NewRecentDirs()
 
+	// Wire onSelect callback: Hide -> NavigateTo -> Record -> SetFocus (D-10)
+	fb.recentDirs.SetOnSelect(func(path string) {
+		fb.recentDirs.Hide()
+		fb.remotePane.NavigateTo(path)
+		fb.recentDirs.Record(path)
+		fb.app.SetFocus(fb.remotePane)
+	})
+
 	fb.transferModal.SetDismissCallback(func() {
 		if fb.transferModal.IsCanceled() {
 			if fb.transferCancel != nil {
@@ -212,6 +220,7 @@ func (fb *FileBrowser) build() {
 // Box.DrawForSubclass's background fill. While child components cover the entire
 // rect, this explicit fill provides a safety net against any edge cases where
 // stale content from the previous view (main TUI) might persist.
+// Overlays (TransferModal, RecentDirs) are drawn on top after the main content.
 func (fb *FileBrowser) Draw(screen tcell.Screen) {
 	x, y, width, height := fb.GetRect()
 	bgStyle := tcell.StyleDefault.Background(tcell.ColorDefault)
@@ -221,6 +230,13 @@ func (fb *FileBrowser) Draw(screen tcell.Screen) {
 		}
 	}
 	fb.Flex.Draw(screen)
+	// Draw overlays on top of main content (Pattern 1, Pitfall 1 fix)
+	if fb.transferModal != nil && fb.transferModal.IsVisible() {
+		fb.transferModal.Draw(screen)
+	}
+	if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
+		fb.recentDirs.Draw(screen)
+	}
 }
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.

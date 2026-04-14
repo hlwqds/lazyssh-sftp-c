@@ -20,15 +20,21 @@ import (
 
 // handleGlobalKeys handles global keyboard events for the FileBrowser.
 // Event propagation chain:
-// 1. FileBrowser.SetInputCapture -> handles Tab, Esc, s, S
-// 2. FocusedPane.SetInputCapture -> handles h, Backspace, Space, .
-// 3. Table.InputHandler -> handles j/k/arrow/Enter/PgUp/PgDn (built-in)
+// 1. Overlay visibility check -> RecentDirs intercepts all keys when visible (D-08)
+// 2. FileBrowser.SetInputCapture -> handles Tab, Esc, s, S, r
+// 3. FocusedPane.SetInputCapture -> handles h, Backspace, Space, .
+// 4. Table.InputHandler -> handles j/k/arrow/Enter/PgUp/PgDn (built-in)
 //
 // Esc handling (D-03 double-Esc pattern):
 //   - If transfer modal is visible, delegate to TransferModal.HandleKey
 //     which manages progress->cancelConfirm->summary mode transitions
 //   - Otherwise, close the file browser
 func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
+	// Overlay key interception: check BEFORE any other key handling (D-08, Pitfall 2)
+	if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
+		return fb.recentDirs.HandleKey(event)
+	}
+
 	switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 	case tcell.KeyTab:
 		fb.switchFocus()
@@ -45,6 +51,12 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	}
 	switch event.Rune() {
+	case 'r':
+		if fb.activePane == 1 && fb.remotePane.IsConnected() {
+			fb.recentDirs.SetCurrentPath(fb.remotePane.GetCurrentPath())
+			fb.recentDirs.Show()
+			return nil
+		}
 	case 's':
 		fb.cycleSortField()
 		return nil
