@@ -51,7 +51,6 @@ type FileBrowser struct {
 	transferModal  *TransferModal
 	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
 	activePane     int         // 0 = local, 1 = remote
-	drawCount      int         // diagnostic: count Draw() calls
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose        func()
@@ -137,14 +136,9 @@ func (fb *FileBrowser) build() {
 		fb.initiateTransfer()
 	})
 
-	// Sync terminal after directory navigation to prevent stale character artifacts.
-	// kitty with transparency may not properly update cells that change content.
-	fb.localPane.OnPathChange(func(_ string) {
-		fb.app.Sync()
-	})
-	fb.remotePane.OnPathChange(func(_ string) {
-		fb.app.Sync()
-	})
+	// NOTE: OnPathChange callbacks removed — app.Sync() was causing the terminal
+	// to receive stale content followed by new content in quick succession,
+	// leading to visual overlap artifacts in GPU-accelerated terminals.
 
 	// Create status bar
 	fb.statusBar = tview.NewTextView()
@@ -156,7 +150,7 @@ func (fb *FileBrowser) build() {
 
 	// Build dual-pane content layout (50:50 per D-04)
 	content := tview.NewFlex().SetDirection(tview.FlexColumn)
-	content.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
+		content.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
 	content.
 		AddItem(fb.localPane, 0, 1, true).  // 50% width, initially focused
 		AddItem(fb.remotePane, 0, 1, false) // 50% width
@@ -175,46 +169,33 @@ func (fb *FileBrowser) build() {
 	// Global input capture for Tab, Esc, s, S
 	fb.SetInputCapture(fb.handleGlobalKeys)
 
-	// Use AfterDrawFunc to redraw the status bar as the absolute last step.
+	// Use AfterDrawFunc to redraw the status bar and force a full terminal sync.
 	// This runs after root.Draw() AND all deferred draws (Flex defers focused items).
+	//
+	// The screen.Sync() call is a workaround for tcell v2.9.0 dirty tracking:
+	// CellBuffer.Fill() (called by screen.Clear()) updates cell content but
+	// does not invalidate them. In some cases, tcell's draw loop skips cells
+	// whose content changed, causing stale content to persist on screen.
+	// Sync() forces Invalidate() on all cells, ensuring every cell update
+	// reaches the terminal. Placed in AfterDrawFunc (not BeforeDrawFunc) so
+	// the sync sends the final content in one flush, avoiding blank flashes.
 	fb.app.SetAfterDrawFunc(func(screen tcell.Screen) {
 		_, _, width, height := fb.GetRect()
-		if height < 1 || fb.statusBar == nil {
-			return
-		}
-		sy := height - 1
-		bgColor := tcell.Color235
-		bgStyle := tcell.StyleDefault.Background(bgColor)
+		if height >= 1 && fb.statusBar != nil {
+			sy := height - 1
+			bgColor := tcell.Color235
+			bgStyle := tcell.StyleDefault.Background(bgColor)
 
-		for col := 0; col < width; col++ {
-			screen.SetContent(col, sy, ' ', nil, bgStyle)
+			for col := 0; col < width; col++ {
+				screen.SetContent(col, sy, ' ', nil, bgStyle)
+			}
+			tview.Print(screen, fb.statusBar.GetText(true), 0, sy, width, tview.AlignCenter, tcell.Color250)
+			for col := 0; col < width; col++ {
+				mainChar, _, style, _ := screen.GetContent(col, sy)
+				screen.SetContent(col, sy, mainChar, nil, style.Background(bgColor))
+			}
 		}
-		tview.Print(screen, fb.statusBar.GetText(true), 0, sy, width, tview.AlignCenter, tcell.Color250)
-		for col := 0; col < width; col++ {
-			mainChar, _, style, _ := screen.GetContent(col, sy)
-			screen.SetContent(col, sy, mainChar, nil, style.Background(bgColor))
-		}
-
-		// Diagnostic: log both panes' offset and selection state
-		if fb.drawCount <= 5 {
-			lpRowOff, lpColOff := fb.localPane.GetOffset()
-			rpRowOff, rpColOff := fb.remotePane.GetOffset()
-			lpSelRow, lpSelCol := fb.localPane.GetSelection()
-			rpSelRow, rpSelCol := fb.remotePane.GetSelection()
-			fb.log.Infow("pane offset/selection diagnostic",
-				"drawCount", fb.drawCount,
-				"local", map[string]interface{}{
-					"offset":    map[string]int{"row": lpRowOff, "col": lpColOff},
-					"selection": map[string]int{"row": lpSelRow, "col": lpSelCol},
-					"path":      fb.localPane.GetCurrentPath(),
-				},
-				"remote", map[string]interface{}{
-					"offset":    map[string]int{"row": rpRowOff, "col": rpColOff},
-					"selection": map[string]int{"row": rpSelRow, "col": rpSelCol},
-					"path":      fb.remotePane.GetCurrentPath(),
-				},
-			)
-		}
+		screen.Sync()
 	})
 
 	// Start SFTP connection in background (per RESEARCH Pattern 3, Pitfall 2)
@@ -236,21 +217,9 @@ func (fb *FileBrowser) build() {
 	fb.localPane.Refresh()
 }
 
-// Draw overrides Flex.Draw to explicitly fill the background before drawing children.
-// This is necessary because Flex sets dontClear=true internally, which skips
-// Box.DrawForSubclass's background fill. While child components cover the entire
-// rect, this explicit fill provides a safety net against any edge cases where
-// stale content from the previous view (main TUI) might persist.
+// Draw overrides Flex.Draw to draw overlays after the main content.
 // Overlays (TransferModal, RecentDirs) are drawn on top after the main content.
 func (fb *FileBrowser) Draw(screen tcell.Screen) {
-	fb.drawCount++
-	x, y, width, height := fb.GetRect()
-	bgStyle := tcell.StyleDefault.Background(tcell.ColorDefault)
-	for row := y; row < y+height; row++ {
-		for col := x; col < x+width; col++ {
-			screen.SetContent(col, row, ' ', nil, bgStyle)
-		}
-	}
 	fb.Flex.Draw(screen)
 	// Draw overlays on top of main content (Pattern 1, Pitfall 1 fix)
 	if fb.transferModal != nil && fb.transferModal.IsVisible() {

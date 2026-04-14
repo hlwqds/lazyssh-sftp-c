@@ -180,14 +180,8 @@ func (rp *RemotePane) Refresh() {
 
 // populateTable fills the table with remote file entries.
 func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
-	// Diagnostic: log rowOffset before clearing to detect stale scroll state
-	if _, rowOff := rp.GetOffset(); rowOff > 0 {
-		rp.log.Infow("populateTable: non-zero rowOffset before Clear",
-			"rowOffset", rowOff,
-			"path", rp.currentPath)
-	}
 	rp.Clear()
-	rp.SetOffset(0, 0) // defensive: ensure scroll resets with content
+	rp.SetOffset(0, 0)
 
 	// Header row
 	headerStyle := tcell.StyleDefault.Bold(true).Foreground(tcell.Color255).Background(tcell.Color235)
