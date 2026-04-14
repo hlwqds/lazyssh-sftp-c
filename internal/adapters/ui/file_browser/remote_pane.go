@@ -48,13 +48,14 @@ func NewRemotePane(log *zap.SugaredLogger, sftp ports.SFTPService, server domain
 		log:         log,
 		sftpService: sftp,
 		server:      server,
-		currentPath: "~", // SSH default home
+		currentPath: ".", // SFTP starts in user's home directory
 		sortMode:    FileSortByNameAsc,
 		showHidden:  false,
 		selected:    make(map[string]bool),
 		connected:   false,
 	}
 	rp.build()
+	rp.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
 	return rp
 }
 

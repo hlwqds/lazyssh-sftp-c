@@ -60,7 +60,7 @@ func (c *SFTPClient) Connect(server domain.Server) error {
 
 	c.log.Infow("starting SFTP connection", "host", server.Host, "alias", server.Alias)
 
-	cmd := exec.Command("ssh", args...) //nolint:gosec // G204: args from Server entity, not user input
+	cmd := exec.Command(args[0], args[1:]...) //nolint:gosec // G204: args from Server entity, not user input
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("create stdout pipe: %w", err)
@@ -89,13 +89,14 @@ func (c *SFTPClient) Connect(server domain.Server) error {
 	c.cmd = cmd
 	c.stdin = stdin
 
-	// Get remote home directory
-	homeDir, err := client.RealPath("~")
-	if err != nil {
-		c.log.Warnw("failed to get remote home dir via RealPath, falling back to Getwd", "error", err)
-		homeDir, err = client.Getwd()
+	// Get remote home directory — use Getwd() as primary since SFTP
+	// RealPath("~") does not expand tilde on all servers.
+	homeDir, err := client.Getwd()
+	if err != nil || homeDir == "" {
+		c.log.Warnw("failed to get remote working directory, trying RealPath", "error", err)
+		homeDir, err = client.RealPath(".")
 		if err != nil {
-			c.log.Warnw("failed to get remote working directory, using /", "error", err)
+			c.log.Warnw("failed to resolve remote path, using /", "error", err)
 			homeDir = "/"
 		}
 	}

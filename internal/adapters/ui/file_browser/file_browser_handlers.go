@@ -75,6 +75,7 @@ func (fb *FileBrowser) switchFocus() {
 // close closes the file browser and returns to the main view.
 // It cleans up the SFTP connection in a goroutine (per Pitfall 3).
 func (fb *FileBrowser) close() {
+	fb.app.SetAfterDrawFunc(nil) // remove status bar redraw callback
 	go func() {
 		_ = fb.sftpService.Close()
 	}()

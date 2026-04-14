@@ -358,6 +358,11 @@ func (t *tui) handleFileBrowser() {
 		return
 	}
 
+	// Close any existing SFTP connection before opening a new file browser
+	if t.sftpService.IsConnected() {
+		_ = t.sftpService.Close()
+	}
+
 	fb := file_browser.NewFileBrowser(
 		t.app,
 		t.logger,
@@ -370,6 +375,7 @@ func (t *tui) handleFileBrowser() {
 		},
 	)
 	t.app.SetRoot(fb, true)
+	t.app.Sync()
 }
 
 // =============================================================================
@@ -610,6 +616,7 @@ func (t *tui) refreshServerList() {
 
 func (t *tui) returnToMain() {
 	t.app.SetRoot(t.root, true)
+	t.app.Sync()
 }
 
 // showStatusTemp displays a temporary message in the status bar (default green) and then restores the default text.

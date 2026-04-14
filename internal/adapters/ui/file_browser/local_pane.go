@@ -51,6 +51,7 @@ func NewLocalPane(log *zap.SugaredLogger, fs ports.FileService, initialPath stri
 		selected:    make(map[string]bool),
 	}
 	lp.build()
+	lp.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
 	return lp
 }
 

@@ -82,6 +82,13 @@ func NewFileBrowser(
 
 // build initializes the layout, panes, status bar, and SFTP connection.
 func (fb *FileBrowser) build() {
+	// Use ColorDefault so the background blends with kitty's native background.
+	// When kitty has background_opacity < 1, specific colors like Color234 create
+	// a visible mismatch against the composited desktop background, causing
+	// stale content to appear as "ghost" artifacts. ColorDefault lets kitty
+	// use its own configured background (#1e1e2e with Catppuccin Mocha).
+	fb.SetBackgroundColor(tcell.ColorDefault)
+
 	// Determine initial local path (D-10: home directory)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -121,7 +128,8 @@ func (fb *FileBrowser) build() {
 		fb.initiateTransfer()
 	})
 
-	// Wire path change callbacks for sync and recent dirs recording
+	// Sync terminal after directory navigation to prevent stale character artifacts.
+	// kitty with transparency may not properly update cells that change content.
 	fb.localPane.OnPathChange(func(_ string) {
 		fb.app.Sync()
 	})
@@ -134,18 +142,23 @@ func (fb *FileBrowser) build() {
 	fb.statusBar = tview.NewTextView()
 	fb.statusBar.SetDynamicColors(true)
 	fb.statusBar.SetBackgroundColor(tcell.Color235)
+	fb.statusBar.SetWrap(false)
 	fb.statusBar.SetTextAlign(tview.AlignCenter)
 	fb.setStatusBarDefault()
 
 	// Build dual-pane content layout (50:50 per D-04)
-	content := tview.NewFlex().SetDirection(tview.FlexColumn).
+	content := tview.NewFlex().SetDirection(tview.FlexColumn)
+	content.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
+	content.
 		AddItem(fb.localPane, 0, 1, true).  // 50% width, initially focused
 		AddItem(fb.remotePane, 0, 1, false) // 50% width
 
-	// Build root layout: content + status bar
+	// Build root layout: content + status bar.
+	// Status bar is a proper Flex child with fixed 1-row height so that
+	// the content Flex (and its Table children) cannot overflow into it.
 	fb.SetDirection(tview.FlexRow).
-		AddItem(content, 0, 1, true).      // content area, takes all space
-		AddItem(fb.statusBar, 1, 0, false) // 1 row status bar
+		AddItem(content, 0, 1, true).      // content takes remaining height
+		AddItem(fb.statusBar, 1, 0, false) // status bar: fixed 1 row
 
 	// Set initial focus state
 	fb.activePane = 0
@@ -153,6 +166,27 @@ func (fb *FileBrowser) build() {
 
 	// Global input capture for Tab, Esc, s, S
 	fb.SetInputCapture(fb.handleGlobalKeys)
+
+	// Use AfterDrawFunc to redraw the status bar as the absolute last step.
+	// This runs after root.Draw() AND all deferred draws (Flex defers focused items).
+	fb.app.SetAfterDrawFunc(func(screen tcell.Screen) {
+		_, _, width, height := fb.GetRect()
+		if height < 1 || fb.statusBar == nil {
+			return
+		}
+		sy := height - 1
+		bgColor := tcell.Color235
+		bgStyle := tcell.StyleDefault.Background(bgColor)
+
+		for col := 0; col < width; col++ {
+			screen.SetContent(col, sy, ' ', nil, bgStyle)
+		}
+		tview.Print(screen, fb.statusBar.GetText(true), 0, sy, width, tview.AlignCenter, tcell.Color250)
+		for col := 0; col < width; col++ {
+			mainChar, _, style, _ := screen.GetContent(col, sy)
+			screen.SetContent(col, sy, mainChar, nil, style.Background(bgColor))
+		}
+	})
 
 	// Start SFTP connection in background (per RESEARCH Pattern 3, Pitfall 2)
 	go func() {
@@ -171,6 +205,22 @@ func (fb *FileBrowser) build() {
 
 	// Load initial local directory listing
 	fb.localPane.Refresh()
+}
+
+// Draw overrides Flex.Draw to explicitly fill the background before drawing children.
+// This is necessary because Flex sets dontClear=true internally, which skips
+// Box.DrawForSubclass's background fill. While child components cover the entire
+// rect, this explicit fill provides a safety net against any edge cases where
+// stale content from the previous view (main TUI) might persist.
+func (fb *FileBrowser) Draw(screen tcell.Screen) {
+	x, y, width, height := fb.GetRect()
+	bgStyle := tcell.StyleDefault.Background(tcell.ColorDefault)
+	for row := y; row < y+height; row++ {
+		for col := x; col < x+width; col++ {
+			screen.SetContent(col, row, ' ', nil, bgStyle)
+		}
+	}
+	fb.Flex.Draw(screen)
 }
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
