@@ -44,6 +44,44 @@
 - Sessions: ~1 (single-day milestone)
 - Notable: Entire milestone completed in 1 day with 3 sequential wave executions
 
+## Milestone: v1.1 — Recent Remote Directories
+
+**Shipped:** 2026-04-14
+**Phases:** 2 | **Plans:** 3 | **Tasks:** 5
+
+### What Was Built
+- In-memory MRU directory list with move-to-front dedup, relative path filtering, 10-entry cap
+- NavigateToParent onPathChange callback fix (symmetric navigation)
+- NavigateTo silent navigation method (popup selection without re-recording)
+- Centered popup overlay with j/k navigation, current-path yellow highlighting
+- Empty state ("暂无最近目录") with minimum height safeguard
+- TransferModal.Draw() pre-existing rendering bug fix via overlay draw chain
+
+### What Worked
+- 2-phase split (data + UI) kept concerns cleanly separated — Phase 4 data layer was testable in isolation
+- TransferModal overlay pattern provided a proven reference implementation for RecentDirs
+- RESEARCH.md pitfall analysis caught the TransferModal.Draw() never-called bug before execution
+- UI-SPEC design contract eliminated ambiguity in color/layout decisions
+
+### What Was Inefficient
+- TransferModal.Draw() not-called bug was a pre-existing issue from v1.0 — should have been caught earlier
+- RecentDirs needed SetCurrentPath decoupling (not discovered during research) — added during execution
+
+### Patterns Established
+- SetCurrentPath() string injection for overlay-to-pane decoupling
+- Full key interception pattern (HandleKey returns nil for ALL keys when popup visible)
+- Overlay draw chain in FileBrowser.Draw() (multiple overlays, priority order)
+
+### Key Lessons
+1. Pre-existing bugs in overlay rendering may go unnoticed without dedicated audit — check all overlay Draw() calls after adding new ones
+2. SetCurrentPath() decoupling avoids tight coupling between overlay components and panes
+3. Empty state minimum height (5 cells) prevents zero-size popup rendering artifacts
+
+### Cost Observations
+- Model mix: sonnet (executor), opus (orchestrator/verifier)
+- Sessions: 1 (single-day milestone)
+- Notable: Small milestone (2 phases) completed efficiently with research + UI-spec front-loading
+
 ---
 
 ## Cross-Milestone Trends
@@ -53,12 +91,14 @@
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
 | v1.0 | 1 | 3 | Initial project, established patterns |
+| v1.1 | 1 | 2 | Small focused milestone, overlay pattern reuse |
 
 ### Cumulative Quality
 
 | Milestone | Tests | Key Quality Metric |
 |-----------|-------|-------------------|
 | v1.0 | 23 | go vet clean, all platforms compile |
+| v1.1 | 28 | +5 tests, TransferModal.Draw() bug fix |
 
 ### Top Lessons (Verified Across Milestones)
 

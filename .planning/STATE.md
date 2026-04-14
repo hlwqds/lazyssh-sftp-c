@@ -4,7 +4,7 @@ milestone: v1.1
 milestone_name: Recent Remote Directories
 status: verifying
 stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-04-14T09:04:06.918Z"
+last_updated: "2026-04-14T09:11:34.611Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 2

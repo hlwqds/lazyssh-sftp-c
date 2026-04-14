@@ -1,5 +1,17 @@
 # Milestones
 
+## v1.1 Recent Remote Directories (Shipped: 2026-04-14)
+
+**Phases completed:** 2 phases, 3 plans, 5 tasks
+
+**Key accomplishments:**
+
+- In-memory MRU directory list with move-to-front dedup, relative path filtering, and 10-entry cap -- zero new dependencies
+- NavigateToParent onPathChange callback fix, NavigateTo silent navigation method, and RecentDirs.Record() wiring through OnPathChange callback chain
+- Centered popup overlay with j/k navigation, current-path yellow highlighting, and TransferModal.Draw() rendering bug fix
+
+---
+
 ## v1.0 File Transfer (Shipped: 2026-04-13)
 
 **Phases completed:** 3 phases, 9 plans, 24 tasks

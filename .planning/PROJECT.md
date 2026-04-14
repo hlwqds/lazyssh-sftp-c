@@ -8,6 +8,11 @@
 
 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、传输，全部键盘驱动。
 
+## Current State
+
+v1.1 shipped 2026-04-14 — 文件传输功能完整，含最近远程目录快速跳转。
+技术栈 ~16,800 行 Go 代码，28 个单元测试（+5 新增）。
+
 ## Requirements
 
 ### Validated
@@ -35,29 +40,13 @@
 - ✓ 传输取消（中途取消正在进行的传输）— v1.0
 - ✓ 跨平台文件权限（Windows/macOS/Linux）— v1.0
 - ✓ 取消后部分文件清理（D-04）— v1.0
-
-## Current Milestone: v1.1 Recent Remote Directories
-
-**Goal:** 在文件浏览器的远程面板中，记录并快速重新访问最近浏览过的远程目录。
-
-**Target features:**
-- 按 `r` 键弹出最近访问的远程目录列表（最近 10 条）
-- 记录粒度为「本机目录 + 服务器」组合
-- 弹出式列表交互（j/k 选择，Enter 跳转，Esc 关闭）
-- 仅内存中保存，退出后清空
-
-### Validated (v1.1)
-
-- ✓ 最近远程目录记录（按本机目录 + 服务器分组，最多 10 条）— Phase 4
-- ✓ NavigateToParent onPathChange 对称性修复（AUX-02）— Phase 4
-- ✓ 快捷键 `r` 弹出历史目录列表（POPUP-01）— Phase 5
-- ✓ 弹出式列表交互（j/k 导航，Enter 跳转，Esc 关闭）（POPUP-02, POPUP-03, POPUP-04）— Phase 5
-- ✓ 空状态提示"暂无最近目录"（POPUP-05）— Phase 5
-- ✓ 当前路径黄色高亮（AUX-01）— Phase 5
+- ✓ 最近远程目录记录（MRU 10 条，仅内存）— v1.1
+- ✓ 最近目录弹出列表（`r` 键，j/k 导航，Enter 跳转）— v1.1
+- ✓ 当前路径黄色高亮 + 空状态提示 — v1.1
 
 ### Active
 
-(None — v1.1 complete)
+(None — planning next milestone)
 
 ### Out of Scope
 
@@ -66,14 +55,15 @@
 - 断点续传 — 复杂度高，scp 不原生支持
 - 多文件并行传输 — v1 单线程传输，保持简单
 - 传输历史记录 — 后续版本考虑
+- 路径缩写显示 — v1.x
+- 数字键快速选择 — v1.x
+- 持久化书签/收藏夹 — v2+
 
 ## Context
 
 lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture + 六边形设计。核心依赖 tview/tcell 构建 TUI，通过调用系统 ssh 命令实现连接。
 
-v1.0 已完成文件传输功能：双栏文件浏览器、SFTP 上传/下载、目录递归传输、进度显示、取消支持、冲突处理、跨平台兼容。技术栈 ~14,490 行 Go 代码，23 个单元测试。
-
-文件传输功能是 README 中标记为 "Upcoming" 的功能，现已实现。
+v1.0 完成文件传输核心功能（9 phases）。v1.1 添加最近远程目录快速跳转功能（2 phases）。
 
 ## Constraints
 
@@ -97,23 +87,15 @@ v1.0 已完成文件传输功能：双栏文件浏览器、SFTP 上传/下载、
 | TransferModal 多模式状态机 | 替代 bool 标志，支持 progress/cancelConfirm/conflictDialog/summary 四种模式 | ✓ modalMode enum + HandleKey dispatch |
 | 冲突处理 channel 同步 | goroutine 中检测冲突后通过 buffered channel 等待 UI 响应 | ✓ buildConflictHandler → actionCh |
 | Build tags 分离平台权限 | Windows 不支持 Unix 权限模型，需要编译时分离 | ✓ permissions_unix.go / permissions_windows.go |
+| 快捷键 `r` 弹出最近目录 | 仅远程面板有效，避免与本地面板冲突 | ✓ case 'r' in handleGlobalKeys with activePane==1 |
+| 记录粒度为「本机目录 + 服务器」组合 | 避免跨服务器目录列表泄露 | ✓ RecentDirs 实例绑定到 FileBrowser |
+| 2-phase 结构（数据层 + UI 层） | 数据结构与 UI 渲染解耦，便于独立测试 | ✓ Phase 4 数据层 + Phase 5 UI 层 |
+| RecentDirs 通过 SetCurrentPath 解耦 | 不直接依赖 RemotePane，overlay 组件独立 | ✓ currentPath string parameter |
+| Overlay draw chain 修复 | TransferModal.Draw() 从未被调用是预存 bug | ✓ FileBrowser.Draw() 添加 overlay 渲染调用 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
-**After each phase transition** (via `/gsd:transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `/gsd:complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
-
 ---
-*Last updated: 2026-04-14 — Phase 5 complete: Recent Directories Popup (v1.1 complete)*
+*Last updated: 2026-04-14 — v1.1 milestone complete*
