@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Recent Remote Directories
 status: verifying
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-04-14T09:11:34.611Z"
+stopped_at: Completed 260414-vmx-PLAN.md
+last_updated: "2026-04-14T14:52:16Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 2
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: 05
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-04-14 - Completed quick task 260414-ucr: Fix table header row invisible in kitty
+Last activity: 2026-04-14 - Completed quick task 260414-vmx: Add targeted pane diagnostic and defensive scroll reset
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -91,9 +91,10 @@ None yet.
 | 260414-oow | Transfer-only recording + disk persistence per server | 2026-04-14 | 589cea2 | [260414-oow-recent-dirs-transfer-only-recording-pers](./quick/260414-oow-recent-dirs-transfer-only-recording-pers/) |
 | 260414-tpo | Fix table header/data row overlap in file browser | 2026-04-14 | f700974 | [260414-tpo-fix-table-header-data-row-overlap-in-bot](./quick/260414-tpo-fix-table-header-data-row-overlap-in-bot/) |
 | 260414-ucr | Fix table header row invisible in kitty with background_opacity | 2026-04-14 | 7dbd0f7 | [260414-ucr-fix-table-header-row-invisible-in-kitty-](./quick/260414-ucr-fix-table-header-row-invisible-in-kitty-/) |
+| 260414-vmx | Add targeted pane diagnostic and defensive scroll reset | 2026-04-14 | 3c7f8c7 | [260414-vmx-add-targeted-diagnostic-for-remote-pane-](./quick/260414-vmx-add-targeted-diagnostic-for-remote-pane-/) |
 
 ## Session Continuity
 
-Last session: 2026-04-14T08:59:14.378Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-04-14T14:50:22Z
+Stopped at: Completed 260414-vmx-PLAN.md
 Resume file: None
