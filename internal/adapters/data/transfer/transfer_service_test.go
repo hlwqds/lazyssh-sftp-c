@@ -113,6 +113,10 @@ func (m *mockSFTPService) Remove(path string) error {
 	return nil
 }
 
+func (m *mockSFTPService) HomeDir() string {
+	return "/home/test"
+}
+
 // mockFileInfo is a minimal os.FileInfo implementation for testing.
 type mockFileInfo struct {
 	name string

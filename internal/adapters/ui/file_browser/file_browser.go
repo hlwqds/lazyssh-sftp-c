@@ -50,7 +50,7 @@ type FileBrowser struct {
 	statusBar      *tview.TextView
 	transferModal  *TransferModal
 	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
-	activePane     int // 0 = local, 1 = remote
+	activePane     int         // 0 = local, 1 = remote
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose        func()
@@ -394,6 +394,8 @@ func (fb *FileBrowser) initiateTransfer() {
 				fb.transferModal.ShowSummary(len(files)-failedCount, failedCount, []string{firstErr.Error()})
 			} else {
 				fb.transferModal.Hide()
+				// Record remote directory path after successful file transfer
+				fb.recentDirs.Record(fb.remotePane.GetCurrentPath())
 				// Auto-refresh target pane (D-12)
 				if fb.activePane == 0 {
 					fb.remotePane.Refresh()
@@ -498,6 +500,8 @@ func (fb *FileBrowser) initiateDirTransfer() {
 				fb.transferModal.ShowSummary(0, len(failed), failed)
 			} else {
 				fb.transferModal.Hide()
+				// Record remote directory path after successful directory transfer
+				fb.recentDirs.Record(fb.remotePane.GetCurrentPath())
 				// Auto-refresh target pane (D-12)
 				if fb.activePane == 0 {
 					fb.remotePane.Refresh()

@@ -72,6 +72,10 @@ func (m *mockSFTPService) Remove(path string) error {
 	return nil
 }
 
+func (m *mockSFTPService) HomeDir() string {
+	return "/home/test"
+}
+
 // TestSFTPServiceStat verifies SFTPService interface has Stat method.
 func TestSFTPServiceStat(t *testing.T) {
 	sftpType := reflect.TypeOf((*SFTPService)(nil)).Elem()
