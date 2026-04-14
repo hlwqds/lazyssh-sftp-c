@@ -62,7 +62,6 @@ func NewRemotePane(log *zap.SugaredLogger, sftp ports.SFTPService, server domain
 // build configures the Table with selection, borders, header, and key handling.
 func (rp *RemotePane) build() {
 	rp.SetSelectable(true, false) // row selection only
-	rp.SetFixed(1, 0)             // fixed header row
 	rp.SetBorder(true).
 		SetBorderColor(tcell.Color238).
 		SetTitleColor(tcell.Color250).

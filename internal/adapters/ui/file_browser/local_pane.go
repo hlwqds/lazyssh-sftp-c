@@ -58,7 +58,6 @@ func NewLocalPane(log *zap.SugaredLogger, fs ports.FileService, initialPath stri
 // build configures the Table with selection, borders, header, and key handling.
 func (lp *LocalPane) build() {
 	lp.SetSelectable(true, false) // row selection only (per UI-SPEC Pitfall 1)
-	lp.SetFixed(1, 0)             // fixed header row
 	lp.SetBorder(true).
 		SetBorderColor(tcell.Color238).
 		SetTitleColor(tcell.Color250).
