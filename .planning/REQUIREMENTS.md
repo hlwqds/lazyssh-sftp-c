@@ -42,17 +42,17 @@
 
 | REQ-ID | Phase | Plan | Task | Status |
 |--------|-------|------|------|--------|
-| HIST-01 | — | — | — | Pending |
-| HIST-02 | — | — | — | Pending |
-| HIST-03 | — | — | — | Pending |
-| HIST-04 | — | — | — | Pending |
-| POPUP-01 | — | — | — | Pending |
-| POPUP-02 | — | — | — | Pending |
-| POPUP-03 | — | — | — | Pending |
-| POPUP-04 | — | — | — | Pending |
-| POPUP-05 | — | — | — | Pending |
-| AUX-01 | — | — | — | Pending |
-| AUX-02 | — | — | — | Pending |
+| HIST-01 | Phase 4 | — | — | Pending |
+| HIST-02 | Phase 4 | — | — | Pending |
+| HIST-03 | Phase 4 | — | — | Pending |
+| HIST-04 | Phase 4 | — | — | Pending |
+| POPUP-01 | Phase 5 | — | — | Pending |
+| POPUP-02 | Phase 5 | — | — | Pending |
+| POPUP-03 | Phase 5 | — | — | Pending |
+| POPUP-04 | Phase 5 | — | — | Pending |
+| POPUP-05 | Phase 5 | — | — | Pending |
+| AUX-01 | Phase 5 | — | — | Pending |
+| AUX-02 | Phase 4 | — | — | Pending |
 
 ---
 *Requirements defined: 2026-04-14 — v1.1 Recent Remote Directories*
