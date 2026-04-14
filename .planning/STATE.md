@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Recent Remote Directories
 status: verifying
-stopped_at: Phase 5 context gathered
-last_updated: "2026-04-14T07:32:05.310Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-04-14T08:59:14.381Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 2
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
   percent: 0
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令
-**Current focus:** Phase 04 — Directory History Core
+**Current focus:** Phase 05 — Recent Directories Popup
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 05 (Recent Directories Popup) — EXECUTING
+Plan: 1 of 1
 Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 04 P01 | 4min | 1 tasks | 2 files |
 | Phase 04 P02 | 3min | 2 tasks | 2 files |
+| Phase 05 P01 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 04]: NavigateToParent onPathChange fix makes navigation symmetric with NavigateInto
 - [Phase 04]: NavigateTo(path) does not trigger onPathChange to prevent re-recording in Phase 5 popup
 - [Phase 04]: OnPathChange callbacks were missing from build() -- added for both panes (Rule 2 auto-fix)
+- [Phase 05]: RecentDirs decoupled from RemotePane: currentPath passed via SetCurrentPath() string
+- [Phase 05]: Full key interception D-08: HandleKey returns nil for ALL keys when popup visible
+- [Phase 05]: TransferModal.Draw() bug fix: added overlay draw call in FileBrowser.Draw() (Pitfall 1)
 
 ### Pending Todos
 
@@ -81,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T07:32:05.304Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-recent-directories-popup/05-CONTEXT.md
+Last session: 2026-04-14T08:59:14.378Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None

@@ -55,7 +55,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 05-01-PLAN.md — 补全 RecentDirs Draw()/HandleKey() + 接入 FileBrowser 按键路由和 overlay 渲染链
+- [x] 05-01-PLAN.md — 补全 RecentDirs Draw()/HandleKey() + 接入 FileBrowser 按键路由和 overlay 渲染链
 
 **UI hint**: yes
 
