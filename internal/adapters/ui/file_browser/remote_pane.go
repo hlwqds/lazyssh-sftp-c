@@ -202,7 +202,8 @@ func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
 			SetAlign(h.align).
 			SetMaxWidth(h.maxWidth).
 			SetExpansion(h.expansion).
-			SetSelectable(false)
+			SetSelectable(false).
+			SetTransparency(false)
 		rp.SetCell(0, col, cell)
 	}
 

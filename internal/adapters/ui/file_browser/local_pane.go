@@ -147,7 +147,8 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 			SetAlign(h.align).
 			SetMaxWidth(h.maxWidth).
 			SetExpansion(h.expansion).
-			SetSelectable(false)
+			SetSelectable(false).
+			SetTransparency(false)
 		lp.SetCell(0, col, cell)
 	}
 
