@@ -51,6 +51,7 @@ type FileBrowser struct {
 	transferModal  *TransferModal
 	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
 	activePane     int         // 0 = local, 1 = remote
+	drawCount      int         // diagnostic: count Draw() calls
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose        func()
@@ -193,6 +194,27 @@ func (fb *FileBrowser) build() {
 			mainChar, _, style, _ := screen.GetContent(col, sy)
 			screen.SetContent(col, sy, mainChar, nil, style.Background(bgColor))
 		}
+
+		// Diagnostic: log both panes' offset and selection state
+		if fb.drawCount <= 5 {
+			lpRowOff, lpColOff := fb.localPane.GetOffset()
+			rpRowOff, rpColOff := fb.remotePane.GetOffset()
+			lpSelRow, lpSelCol := fb.localPane.GetSelection()
+			rpSelRow, rpSelCol := fb.remotePane.GetSelection()
+			fb.log.Infow("pane offset/selection diagnostic",
+				"drawCount", fb.drawCount,
+				"local", map[string]interface{}{
+					"offset":    map[string]int{"row": lpRowOff, "col": lpColOff},
+					"selection": map[string]int{"row": lpSelRow, "col": lpSelCol},
+					"path":      fb.localPane.GetCurrentPath(),
+				},
+				"remote", map[string]interface{}{
+					"offset":    map[string]int{"row": rpRowOff, "col": rpColOff},
+					"selection": map[string]int{"row": rpSelRow, "col": rpSelCol},
+					"path":      fb.remotePane.GetCurrentPath(),
+				},
+			)
+		}
 	})
 
 	// Start SFTP connection in background (per RESEARCH Pattern 3, Pitfall 2)
@@ -221,6 +243,7 @@ func (fb *FileBrowser) build() {
 // stale content from the previous view (main TUI) might persist.
 // Overlays (TransferModal, RecentDirs) are drawn on top after the main content.
 func (fb *FileBrowser) Draw(screen tcell.Screen) {
+	fb.drawCount++
 	x, y, width, height := fb.GetRect()
 	bgStyle := tcell.StyleDefault.Background(tcell.ColorDefault)
 	for row := y; row < y+height; row++ {

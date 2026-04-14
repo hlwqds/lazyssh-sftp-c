@@ -126,6 +126,7 @@ func (lp *LocalPane) Refresh() {
 // populateTable fills the table with file entries.
 func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 	lp.Clear()
+	lp.SetOffset(0, 0) // defensive: ensure scroll resets with content
 
 	// Header row
 	headerStyle := tcell.StyleDefault.Bold(true).Foreground(tcell.Color255).Background(tcell.Color235)
