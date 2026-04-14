@@ -18,7 +18,7 @@
 ## P3: 辅助功能
 
 - [ ] **AUX-01**: 弹窗列表中，与当前远程面板路径相同的条目用不同颜色高亮显示
-- [ ] **AUX-02**: 修复 `RemotePane.NavigateToParent()` 缺少 `onPathChange` 回调的预存 bug（导致返回上级目录时路径未被记录且终端未 Sync）
+- [x] **AUX-02**: 修复 `RemotePane.NavigateToParent()` 缺少 `onPathChange` 回调的预存 bug（导致返回上级目录时路径未被记录且终端未 Sync）
 
 ## Future Requirements (Deferred)
 

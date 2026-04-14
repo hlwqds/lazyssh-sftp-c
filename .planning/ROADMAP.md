@@ -38,7 +38,7 @@
 
 Plans:
 - [x] 04-01-PLAN.md — 创建 RecentDirs MRU 数据结构 + 单元测试
-- [ ] 04-02-PLAN.md — 修复 NavigateToParent bug + 添加 NavigateTo + 接入 Record 调用
+- [x] 04-02-PLAN.md — 修复 NavigateToParent bug + 添加 NavigateTo + 接入 Record 调用
 
 **UI hint**: yes
 

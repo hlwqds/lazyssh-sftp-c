@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Recent Remote Directories
-status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-04-14T07:05:45.483Z"
+status: verifying
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-04-14T07:12:02.211Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Phase: 04 (Directory History Core) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
 Progress: [░░░░░░░░░░] 0%
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 04 P01 | 4min | 1 tasks | 2 files |
+| Phase 04 P02 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,9 @@ Recent decisions affecting current work:
 - [v1.1]: 记录粒度为「本机目录 + 服务器」组合，最多 10 条，仅内存保存
 - [v1.1]: 2-phase coarse structure — Phase 4 数据层+bug fix, Phase 5 UI 层+集成
 - [Phase 04]: RecentDirs embeds *tview.Box following TransferModal overlay pattern; Record() uses []string slice with move-to-front dedup; zero new dependencies
+- [Phase 04]: NavigateToParent onPathChange fix makes navigation symmetric with NavigateInto
+- [Phase 04]: NavigateTo(path) does not trigger onPathChange to prevent re-recording in Phase 5 popup
+- [Phase 04]: OnPathChange callbacks were missing from build() -- added for both panes (Rule 2 auto-fix)
 
 ### Pending Todos
 
@@ -77,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T07:05:45.479Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-04-14T07:12:02.207Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
