@@ -16,6 +16,8 @@ package file_browser
 
 import (
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // TestRecordSinglePath verifies that Record adds a path and GetPaths returns it.
@@ -125,5 +127,204 @@ func TestRecordDuplicateDoesNotCreateDuplicates(t *testing.T) {
 	}
 	if paths[0] != "/home/user" {
 		t.Errorf("expected \"/home/user\", got %q", paths[0])
+	}
+}
+
+// TestHandleKeyNotVisible passes through events when popup is hidden.
+func TestHandleKeyNotVisible(t *testing.T) {
+	rd := NewRecentDirs()
+	ev := tcell.NewEventKey(tcell.KeyRune, 'j', 0)
+	result := rd.HandleKey(ev)
+	if result != ev {
+		t.Error("expected event to pass through when not visible")
+	}
+}
+
+// TestHandleKeyEscHidesPopup verifies Esc hides the popup and consumes the event.
+func TestHandleKeyEscHidesPopup(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Record("/b")
+	rd.Show()
+	ev := tcell.NewEventKey(tcell.KeyEscape, 0, 0)
+	result := rd.HandleKey(ev)
+	if result != nil {
+		t.Error("expected Esc to consume event (return nil)")
+	}
+	if rd.IsVisible() {
+		t.Error("expected popup to be hidden after Esc")
+	}
+}
+
+// TestHandleKeyEnterSelectsPath verifies Enter calls onSelect with selected path.
+func TestHandleKeyEnterSelectsPath(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Record("/b")
+	rd.Record("/c")
+	rd.Show()
+
+	var selectedPath string
+	rd.SetOnSelect(func(path string) {
+		selectedPath = path
+	})
+
+	// Move selection down by one
+	downEv := tcell.NewEventKey(tcell.KeyDown, 0, 0)
+	rd.HandleKey(downEv)
+
+	// Press Enter
+	enterEv := tcell.NewEventKey(tcell.KeyEnter, 0, 0)
+	result := rd.HandleKey(enterEv)
+	if result != nil {
+		t.Error("expected Enter to consume event (return nil)")
+	}
+	if selectedPath != "/b" {
+		t.Errorf("expected selected path \"/b\", got %q", selectedPath)
+	}
+}
+
+// TestHandleKeyEnterEmptyList verifies Enter is a no-op when list is empty.
+func TestHandleKeyEnterEmptyList(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Show()
+
+	called := false
+	rd.SetOnSelect(func(path string) {
+		called = true
+	})
+
+	enterEv := tcell.NewEventKey(tcell.KeyEnter, 0, 0)
+	rd.HandleKey(enterEv)
+	if called {
+		t.Error("expected onSelect NOT to be called for empty list")
+	}
+}
+
+// TestHandleKeyJKNavigation verifies j/k rune keys move selection.
+func TestHandleKeyJKNavigation(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Record("/b")
+	rd.Record("/c")
+	rd.Show()
+
+	// j moves down
+	jEv := tcell.NewEventKey(tcell.KeyRune, 'j', 0)
+	rd.HandleKey(jEv)
+	if rd.GetSelectedIndex() != 1 {
+		t.Errorf("expected selectedIndex=1 after j, got %d", rd.GetSelectedIndex())
+	}
+
+	// j moves down again
+	rd.HandleKey(jEv)
+	if rd.GetSelectedIndex() != 2 {
+		t.Errorf("expected selectedIndex=2 after j, got %d", rd.GetSelectedIndex())
+	}
+
+	// j clamps at last
+	rd.HandleKey(jEv)
+	if rd.GetSelectedIndex() != 2 {
+		t.Errorf("expected selectedIndex=2 (clamped), got %d", rd.GetSelectedIndex())
+	}
+
+	// k moves up
+	kEv := tcell.NewEventKey(tcell.KeyRune, 'k', 0)
+	rd.HandleKey(kEv)
+	if rd.GetSelectedIndex() != 1 {
+		t.Errorf("expected selectedIndex=1 after k, got %d", rd.GetSelectedIndex())
+	}
+
+	// k clamps at 0
+	kEv2 := tcell.NewEventKey(tcell.KeyRune, 'k', 0)
+	rd.HandleKey(kEv2)
+	kEv3 := tcell.NewEventKey(tcell.KeyRune, 'k', 0)
+	rd.HandleKey(kEv3)
+	if rd.GetSelectedIndex() != 0 {
+		t.Errorf("expected selectedIndex=0 (clamped), got %d", rd.GetSelectedIndex())
+	}
+}
+
+// TestHandleKeyArrowNavigation verifies arrow keys move selection same as j/k.
+func TestHandleKeyArrowNavigation(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Record("/b")
+	rd.Show()
+
+	downEv := tcell.NewEventKey(tcell.KeyDown, 0, 0)
+	rd.HandleKey(downEv)
+	if rd.GetSelectedIndex() != 1 {
+		t.Errorf("expected selectedIndex=1 after Down, got %d", rd.GetSelectedIndex())
+	}
+
+	upEv := tcell.NewEventKey(tcell.KeyUp, 0, 0)
+	rd.HandleKey(upEv)
+	if rd.GetSelectedIndex() != 0 {
+		t.Errorf("expected selectedIndex=0 after Up, got %d", rd.GetSelectedIndex())
+	}
+}
+
+// TestHandleKeyConsumesAllWhenVisible verifies all keys return nil when popup visible (D-08).
+func TestHandleKeyConsumesAllWhenVisible(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Show()
+
+	// Random key should be consumed
+	randomEv := tcell.NewEventKey(tcell.KeyRune, 'x', 0)
+	result := rd.HandleKey(randomEv)
+	if result != nil {
+		t.Error("expected all keys to be consumed (return nil) when popup visible")
+	}
+}
+
+// TestShowResetsSelectedIndex verifies Show() resets selectedIndex to 0.
+func TestShowResetsSelectedIndex(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.Record("/a")
+	rd.Record("/b")
+	rd.Record("/c")
+	rd.Show()
+
+	// Move selection to index 2
+	downEv := tcell.NewEventKey(tcell.KeyDown, 0, 0)
+	rd.HandleKey(downEv)
+	rd.HandleKey(downEv)
+	if rd.GetSelectedIndex() != 2 {
+		t.Fatalf("setup: expected selectedIndex=2, got %d", rd.GetSelectedIndex())
+	}
+
+	// Hide and show again
+	rd.Hide()
+	rd.Show()
+	if rd.GetSelectedIndex() != 0 {
+		t.Errorf("expected selectedIndex=0 after Show(), got %d", rd.GetSelectedIndex())
+	}
+}
+
+// TestSetCurrentPath verifies SetCurrentPath trims trailing slashes.
+func TestSetCurrentPath(t *testing.T) {
+	rd := NewRecentDirs()
+	rd.SetCurrentPath("/home/user/docs/")
+	if rd.GetCurrentPath() != "/home/user/docs" {
+		t.Errorf("expected \"/home/user/docs\", got %q", rd.GetCurrentPath())
+	}
+}
+
+// TestSetOnSelect verifies callback is stored and callable.
+func TestSetOnSelect(t *testing.T) {
+	rd := NewRecentDirs()
+	var received string
+	rd.SetOnSelect(func(path string) {
+		received = path
+	})
+	// Can't directly call onSelect, but entering a path with Enter will invoke it
+	rd.Record("/test")
+	rd.Show()
+	enterEv := tcell.NewEventKey(tcell.KeyEnter, 0, 0)
+	rd.HandleKey(enterEv)
+	if received != "/test" {
+		t.Errorf("expected \"/test\", got %q", received)
 	}
 }
