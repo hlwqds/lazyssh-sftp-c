@@ -15,38 +15,59 @@
 package file_browser
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"go.uber.org/zap"
 )
 
 // maxRecentDirs is the maximum number of directory paths retained in the MRU list.
 const maxRecentDirs = 10
 
-// RecentDirs maintains an in-memory MRU (Most Recently Used) list of remote directory paths.
+// RecentDirs maintains a persistent MRU (Most Recently Used) list of remote directory paths.
 // It follows the TransferModal overlay pattern: embeds *tview.Box, uses visible flag.
+// Paths are persisted to disk at ~/.lazyssh/recent-dirs/{user@host}.json.
 // Phase 4 provides the data layer; Phase 5 adds Draw() rendering and HandleKey() navigation.
 type RecentDirs struct {
 	*tview.Box
-	paths        []string
-	visible      bool
+	paths         []string
+	visible       bool
 	selectedIndex int
-	onSelect     func(path string)
-	currentPath  string
+	onSelect      func(path string)
+	currentPath   string
+	log           *zap.SugaredLogger
+	serverKey     string // "user@host" for per-server isolation
+	filePath      string // absolute path to the JSON persistence file
 }
 
-// NewRecentDirs creates a new RecentDirs overlay component with an empty path list.
-func NewRecentDirs() *RecentDirs {
+// NewRecentDirs creates a new RecentDirs overlay component.
+// It loads previously persisted paths from ~/.lazyssh/recent-dirs/{user@host}.json.
+// The serverKey parameter should be in "user@host" format for per-server isolation.
+func NewRecentDirs(log *zap.SugaredLogger, serverHost, serverUser string) *RecentDirs {
+	serverKey := serverUser + "@" + serverHost
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
+	filePath := filepath.Join(homeDir, ".lazyssh", "recent-dirs", serverKey+".json")
+
 	rd := &RecentDirs{
-		Box:     tview.NewBox(),
-		paths:   make([]string, 0, maxRecentDirs),
-		visible: false,
+		Box:       tview.NewBox(),
+		paths:     make([]string, 0, maxRecentDirs),
+		visible:   false,
+		log:       log,
+		serverKey: serverKey,
+		filePath:  filePath,
 	}
 	rd.SetBorder(true).
 		SetBorderColor(tcell.Color238).
 		SetTitleColor(tcell.Color250).
 		SetBackgroundColor(tcell.Color232)
+	rd.loadFromDisk()
 	return rd
 }
 
@@ -54,6 +75,7 @@ func NewRecentDirs() *RecentDirs {
 // Relative paths (starting with ".") are silently skipped.
 // Paths are normalized by removing trailing slashes.
 // The list is capped at maxRecentDirs entries; oldest entries are truncated.
+// After updating the in-memory list, the change is persisted to disk.
 func (rd *RecentDirs) Record(path string) {
 	normalized := strings.TrimRight(path, "/")
 	if strings.HasPrefix(normalized, ".") {
@@ -71,6 +93,53 @@ func (rd *RecentDirs) Record(path string) {
 	// Truncate to max
 	if len(rd.paths) > maxRecentDirs {
 		rd.paths = rd.paths[:maxRecentDirs]
+	}
+	rd.saveToDisk()
+}
+
+// loadFromDisk loads previously persisted paths from the JSON file.
+// If the file does not exist, the paths slice remains empty (silent, no error).
+func (rd *RecentDirs) loadFromDisk() {
+	if _, err := os.Stat(rd.filePath); os.IsNotExist(err) {
+		return
+	}
+
+	data, err := os.ReadFile(rd.filePath)
+	if err != nil {
+		rd.log.Errorw("failed to read recent dirs file", "path", rd.filePath, "error", err)
+		return
+	}
+
+	if len(data) == 0 {
+		return
+	}
+
+	var paths []string
+	if err := json.Unmarshal(data, &paths); err != nil {
+		rd.log.Errorw("failed to parse recent dirs JSON", "path", rd.filePath, "error", err)
+		return
+	}
+
+	rd.paths = paths
+}
+
+// saveToDisk persists the current path list to disk as JSON.
+// Errors are logged but do not propagate — Record should not fail due to I/O issues.
+func (rd *RecentDirs) saveToDisk() {
+	dir := filepath.Dir(rd.filePath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		rd.log.Errorw("failed to create recent dirs directory", "path", dir, "error", err)
+		return
+	}
+
+	data, err := json.MarshalIndent(rd.paths, "", "  ")
+	if err != nil {
+		rd.log.Errorw("failed to marshal recent dirs", "path", rd.filePath, "error", err)
+		return
+	}
+
+	if err := os.WriteFile(rd.filePath, data, 0o600); err != nil {
+		rd.log.Errorw("failed to write recent dirs file", "path", rd.filePath, "error", err)
 	}
 }
 
