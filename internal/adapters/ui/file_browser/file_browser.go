@@ -49,6 +49,7 @@ type FileBrowser struct {
 	remotePane     *RemotePane
 	statusBar      *tview.TextView
 	transferModal  *TransferModal
+	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
 	activePane     int // 0 = local, 1 = remote
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
@@ -94,6 +95,10 @@ func (fb *FileBrowser) build() {
 
 	// Create transfer modal
 	fb.transferModal = NewTransferModal(fb.app)
+
+	// Create recent directories tracker (Phase 4: data layer, Phase 5: popup UI)
+	fb.recentDirs = NewRecentDirs()
+
 	fb.transferModal.SetDismissCallback(func() {
 		if fb.transferModal.IsCanceled() {
 			if fb.transferCancel != nil {
@@ -114,6 +119,15 @@ func (fb *FileBrowser) build() {
 	})
 	fb.remotePane.OnFileAction(func(fi domain.FileInfo) {
 		fb.initiateTransfer()
+	})
+
+	// Wire path change callbacks for sync and recent dirs recording
+	fb.localPane.OnPathChange(func(_ string) {
+		fb.app.Sync()
+	})
+	fb.remotePane.OnPathChange(func(path string) {
+		fb.app.Sync()
+		fb.recentDirs.Record(path) // D-04: record path for recent dirs list
 	})
 
 	// Create status bar
