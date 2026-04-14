@@ -52,7 +52,11 @@ Plans:
   3. 用户按 `Enter` 选择目录后，远程面板直接跳转到该路径并刷新文件列表，弹窗关闭
   4. 当还没有访问过任何目录时，按 `r` 显示"暂无最近目录"提示文本
   5. 弹窗列表中，与当前远程面板路径相同的条目用不同颜色高亮显示
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 05-01-PLAN.md — 补全 RecentDirs Draw()/HandleKey() + 接入 FileBrowser 按键路由和 overlay 渲染链
+
 **UI hint**: yes
 
 ## Progress
@@ -66,6 +70,6 @@ Phases execute in numeric order: 4 -> 5
 | 2. Core Transfer | v1.0 | 3/3 | Complete | 2026-04-13 |
 | 3. Polish | v1.0 | 3/3 | Complete | 2026-04-13 |
 | 4. Directory History Core | v1.1 | 0/2 | Not started | - |
-| 5. Recent Directories Popup | v1.1 | 0/? | Not started | - |
+| 5. Recent Directories Popup | v1.1 | 0/1 | Not started | - |
 
 Full details (v1.0): .planning/milestones/v1.0-ROADMAP.md
