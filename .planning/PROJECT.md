@@ -46,9 +46,13 @@
 - 弹出式列表交互（j/k 选择，Enter 跳转，Esc 关闭）
 - 仅内存中保存，退出后清空
 
+### Validated (v1.1)
+
+- ✓ 最近远程目录记录（按本机目录 + 服务器分组，最多 10 条）— Phase 4
+- ✓ NavigateToParent onPathChange 对称性修复（AUX-02）— Phase 4
+
 ### Active
 
-- 最近远程目录记录（按本机目录 + 服务器分组，最多 10 条）
 - 快捷键 `r` 弹出历史目录列表
 - 弹出式列表交互（j/k 导航，Enter 跳转，Esc 关闭）
 
@@ -109,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 — v1.1 milestone started*
+*Last updated: 2026-04-14 — Phase 4 complete: Directory History Core*
