@@ -284,6 +284,9 @@ func (rp *RemotePane) NavigateToParent() {
 	rp.currentPath = parent
 	rp.selected = make(map[string]bool)
 	rp.Refresh()
+	if rp.onPathChange != nil {
+		rp.onPathChange(rp.currentPath)
+	}
 }
 
 // NavigateInto enters a subdirectory.
@@ -297,6 +300,19 @@ func (rp *RemotePane) NavigateInto(dirName string) {
 	if rp.onPathChange != nil {
 		rp.onPathChange(rp.currentPath)
 	}
+}
+
+// NavigateTo sets the remote pane to a specific path directly.
+// Unlike NavigateInto, it does not trigger onPathChange callback.
+// Used by RecentDirs popup navigation (Phase 5) to avoid re-recording
+// the path when the user selects from the recent list.
+func (rp *RemotePane) NavigateTo(path string) {
+	if !rp.connected {
+		return
+	}
+	rp.currentPath = path
+	rp.selected = make(map[string]bool)
+	rp.Refresh()
 }
 
 // ToggleHidden flips the hidden files visibility flag.
