@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Recent Remote Directories
-status: roadmap-created
-stopped_at:
-last_updated: "2026-04-14T00:00:00.000Z"
-last_activity: 2026-04-14
+status: planning
+stopped_at: Phase 4 context gathered
+last_updated: "2026-04-14T06:36:30.715Z"
+last_activity: 2026-04-14 — Roadmap created for v1.1
 progress:
   total_phases: 2
   completed_phases: 0
@@ -75,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T00:00:00.000Z
-Stopped at: Roadmap created
-Resume file: None
+Last session: 2026-04-14T06:36:30.711Z
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-directory-history-core/04-CONTEXT.md
