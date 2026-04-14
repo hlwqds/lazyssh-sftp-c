@@ -26,11 +26,14 @@ const maxRecentDirs = 10
 
 // RecentDirs maintains an in-memory MRU (Most Recently Used) list of remote directory paths.
 // It follows the TransferModal overlay pattern: embeds *tview.Box, uses visible flag.
-// Phase 4 provides the data layer; Phase 5 adds Draw() rendering.
+// Phase 4 provides the data layer; Phase 5 adds Draw() rendering and HandleKey() navigation.
 type RecentDirs struct {
 	*tview.Box
-	paths   []string
-	visible bool
+	paths        []string
+	visible      bool
+	selectedIndex int
+	onSelect     func(path string)
+	currentPath  string
 }
 
 // NewRecentDirs creates a new RecentDirs overlay component with an empty path list.
@@ -79,18 +82,80 @@ func (rd *RecentDirs) GetPaths() []string {
 }
 
 // Draw renders the recent dirs overlay to the screen.
-// Phase 5 will implement the actual list rendering.
+// Layout per CONTEXT.md D-01/D-03/UI-SPEC:
+//   - Width: 60% of terminal (max 80 columns)
+//   - Height: len(paths)+2 (min 5, max 15)
+//   - Centered on screen
+//
+// Rendering order per Pitfall 3: SetRect -> Box.DrawForSubclass -> fill selected row bg -> tview.Print text.
 func (rd *RecentDirs) Draw(screen tcell.Screen) {
 	if !rd.visible {
 		return
 	}
+
+	termWidth, termHeight := screen.Size()
+
+	// Calculate popup dimensions (D-01, D-03, Pitfall 6)
+	width := termWidth * 60 / 100
+	if width > 80 {
+		width = 80
+	}
+	height := len(rd.paths) + 2
+	if height < 5 {
+		height = 5 // minimum for empty state text
+	}
+	if height > 15 {
+		height = 15
+	}
+	x := (termWidth - width) / 2
+	y := (termHeight - height) / 2
+
+	// Position and draw border/background (Pitfall 4: SetRect before DrawForSubclass)
+	rd.SetTitle(" Recent Directories ") // D-13
+	rd.SetRect(x, y, width, height)
 	rd.Box.DrawForSubclass(screen, rd)
-	// Phase 5: render directory list
+
+	ix, iy, iw, ih := rd.GetInnerRect()
+
+	if len(rd.paths) == 0 {
+		// Empty state: centered "暂无最近目录" (D-06, POPUP-05)
+		tview.Print(screen, "暂无最近目录", ix, iy+ih/2, iw, tview.AlignCenter, tcell.Color240)
+		return
+	}
+
+	// List rendering: background fill BEFORE text (Pitfall 3)
+	for i, path := range rd.paths {
+		row := iy + i
+		if row >= iy+ih {
+			break
+		}
+
+		// Determine colors (D-04, D-05, AUX-01)
+		fgColor := tcell.Color250 // default white text
+		isSelected := i == rd.selectedIndex
+		isCurrent := path == rd.currentPath
+
+		if isCurrent {
+			fgColor = tcell.ColorYellow // AUX-01: current path in yellow
+		}
+
+		// Fill selected row background first (Pitfall 3: bg before text)
+		if isSelected {
+			bgStyle := tcell.StyleDefault.Background(tcell.Color236) // D-04
+			for col := ix; col < ix+iw; col++ {
+				screen.SetContent(col, row, ' ', nil, bgStyle)
+			}
+		}
+
+		// Render path text on top of background
+		tview.Print(screen, path, ix+1, row, iw-2, tview.AlignLeft, fgColor)
+	}
 }
 
-// Show makes the overlay visible.
+// Show makes the overlay visible and resets selection to the first item.
 func (rd *RecentDirs) Show() {
 	rd.visible = true
+	rd.selectedIndex = 0
 }
 
 // Hide hides the overlay.
@@ -101,4 +166,75 @@ func (rd *RecentDirs) Hide() {
 // IsVisible returns whether the overlay is currently displayed.
 func (rd *RecentDirs) IsVisible() bool {
 	return rd.visible
+}
+
+// SetOnSelect sets the callback invoked when the user presses Enter on a list item.
+func (rd *RecentDirs) SetOnSelect(fn func(path string)) {
+	rd.onSelect = fn
+}
+
+// SetCurrentPath sets the current remote directory path for highlighting (AUX-01).
+// Trailing slashes are stripped for consistent comparison.
+func (rd *RecentDirs) SetCurrentPath(path string) {
+	rd.currentPath = strings.TrimRight(path, "/")
+}
+
+// GetCurrentPath returns the stored current path (for testing).
+func (rd *RecentDirs) GetCurrentPath() string {
+	return rd.currentPath
+}
+
+// GetSelectedIndex returns the current selection index (for testing).
+func (rd *RecentDirs) GetSelectedIndex() int {
+	return rd.selectedIndex
+}
+
+// HandleKey processes keyboard input for the recent dirs popup.
+// When visible, all keys are consumed (return nil) per D-08.
+// j/k/Down/Up navigate selection, Enter selects, Esc hides.
+func (rd *RecentDirs) HandleKey(event *tcell.EventKey) *tcell.EventKey {
+	if !rd.visible {
+		return event
+	}
+
+	switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
+	case tcell.KeyEscape:
+		rd.Hide()
+		return nil
+	case tcell.KeyEnter:
+		if len(rd.paths) > 0 && rd.onSelect != nil {
+			rd.onSelect(rd.paths[rd.selectedIndex])
+		}
+		return nil
+	case tcell.KeyDown:
+		rd.selectedIndex++
+		if rd.selectedIndex >= len(rd.paths) {
+			rd.selectedIndex = len(rd.paths) - 1
+		}
+		return nil
+	case tcell.KeyUp:
+		rd.selectedIndex--
+		if rd.selectedIndex < 0 {
+			rd.selectedIndex = 0
+		}
+		return nil
+	}
+
+	switch event.Rune() {
+	case 'j':
+		rd.selectedIndex++
+		if rd.selectedIndex >= len(rd.paths) {
+			rd.selectedIndex = len(rd.paths) - 1
+		}
+		return nil
+	case 'k':
+		rd.selectedIndex--
+		if rd.selectedIndex < 0 {
+			rd.selectedIndex = 0
+		}
+		return nil
+	}
+
+	// Full key interception: consume all other keys when visible (D-08)
+	return nil
 }
