@@ -50,11 +50,14 @@
 
 - ✓ 最近远程目录记录（按本机目录 + 服务器分组，最多 10 条）— Phase 4
 - ✓ NavigateToParent onPathChange 对称性修复（AUX-02）— Phase 4
+- ✓ 快捷键 `r` 弹出历史目录列表（POPUP-01）— Phase 5
+- ✓ 弹出式列表交互（j/k 导航，Enter 跳转，Esc 关闭）（POPUP-02, POPUP-03, POPUP-04）— Phase 5
+- ✓ 空状态提示"暂无最近目录"（POPUP-05）— Phase 5
+- ✓ 当前路径黄色高亮（AUX-01）— Phase 5
 
 ### Active
 
-- 快捷键 `r` 弹出历史目录列表
-- 弹出式列表交互（j/k 导航，Enter 跳转，Esc 关闭）
+(None — v1.1 complete)
 
 ### Out of Scope
 
@@ -113,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 — Phase 4 complete: Directory History Core*
+*Last updated: 2026-04-14 — Phase 5 complete: Recent Directories Popup (v1.1 complete)*
