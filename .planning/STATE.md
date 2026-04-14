@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: 05
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-04-14 - Completed quick task 260414-od1: Fix recent remote dirs
+Last activity: 2026-04-14 - Completed quick task 260414-tpo: Fix table header/data row overlap
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -89,6 +89,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260414-od1 | Fix recent remote dirs: record absolute paths and record on transfer | 2026-04-14 | 1e30d29 | [260414-od1-fix-recent-remote-dirs-record-absolute-p](./quick/260414-od1-fix-recent-remote-dirs-record-absolute-p/) |
 | 260414-oow | Transfer-only recording + disk persistence per server | 2026-04-14 | 589cea2 | [260414-oow-recent-dirs-transfer-only-recording-pers](./quick/260414-oow-recent-dirs-transfer-only-recording-pers/) |
+| 260414-tpo | Fix table header/data row overlap in file browser | 2026-04-14 | f700974 | [260414-tpo-fix-table-header-data-row-overlap-in-bot](./quick/260414-tpo-fix-table-header-data-row-overlap-in-bot/) |
 
 ## Session Continuity
 
