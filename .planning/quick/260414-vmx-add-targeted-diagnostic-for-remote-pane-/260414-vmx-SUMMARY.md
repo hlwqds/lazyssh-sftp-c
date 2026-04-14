@@ -102,3 +102,11 @@ None - build and vet pass cleanly.
 ---
 *Quick Task: 260414-vmx*
 *Completed: 2026-04-14*
+
+## Self-Check: PASSED
+
+- FOUND: internal/adapters/ui/file_browser/remote_pane.go
+- FOUND: internal/adapters/ui/file_browser/local_pane.go
+- FOUND: internal/adapters/ui/file_browser/file_browser.go
+- FOUND: .planning/quick/260414-vmx-add-targeted-diagnostic-for-remote-pane-/260414-vmx-SUMMARY.md
+- FOUND: commit 3c7f8c7
