@@ -34,7 +34,12 @@
   2. 用户多次导航到同一目录时，该路径在列表中仅出现一次，且位于最前
   3. 最近目录列表始终不超过 10 条，超出时最旧条目被移除
   4. 用户按 `h` 返回上级目录时，父目录路径被正确记录，且终端标题同步更新（AUX-02 修复验证）
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — 创建 RecentDirs MRU 数据结构 + 单元测试
+- [ ] 04-02-PLAN.md — 修复 NavigateToParent bug + 添加 NavigateTo + 接入 Record 调用
+
 **UI hint**: yes
 
 ### Phase 5: Recent Directories Popup
@@ -60,7 +65,7 @@ Phases execute in numeric order: 4 -> 5
 | 1. Foundation | v1.0 | 3/3 | Complete | 2026-04-13 |
 | 2. Core Transfer | v1.0 | 3/3 | Complete | 2026-04-13 |
 | 3. Polish | v1.0 | 3/3 | Complete | 2026-04-13 |
-| 4. Directory History Core | v1.1 | 0/? | Not started | - |
+| 4. Directory History Core | v1.1 | 0/2 | Not started | - |
 | 5. Recent Directories Popup | v1.1 | 0/? | Not started | - |
 
 Full details (v1.0): .planning/milestones/v1.0-ROADMAP.md
