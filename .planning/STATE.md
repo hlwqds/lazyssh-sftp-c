@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Recent Remote Directories
-status: planning
-stopped_at: Phase 4 context gathered
-last_updated: "2026-04-14T06:36:30.715Z"
-last_activity: 2026-04-14 — Roadmap created for v1.1
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-04-14T07:05:45.483Z"
+last_activity: 2026-04-14
 progress:
   total_phases: 2
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令
-**Current focus:** v1.1 Phase 4 — Directory History Core
+**Current focus:** Phase 04 — Directory History Core
 
 ## Current Position
 
-Phase: 4 of 5 (Directory History Core)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-04-14 — Roadmap created for v1.1
+Phase: 04 (Directory History Core) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-04-14
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -47,6 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 *Updated after each plan completion*
+| Phase 04 P01 | 4min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,7 @@ Recent decisions affecting current work:
 - [v1.1]: 快捷键 `r` 弹出最近远程目录（仅远程面板有效）
 - [v1.1]: 记录粒度为「本机目录 + 服务器」组合，最多 10 条，仅内存保存
 - [v1.1]: 2-phase coarse structure — Phase 4 数据层+bug fix, Phase 5 UI 层+集成
+- [Phase 04]: RecentDirs embeds *tview.Box following TransferModal overlay pattern; Record() uses []string slice with move-to-front dedup; zero new dependencies
 
 ### Pending Todos
 
@@ -75,6 +77,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T06:36:30.711Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-directory-history-core/04-CONTEXT.md
+Last session: 2026-04-14T07:05:45.479Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
