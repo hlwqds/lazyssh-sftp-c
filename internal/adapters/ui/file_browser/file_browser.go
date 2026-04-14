@@ -104,7 +104,7 @@ func (fb *FileBrowser) build() {
 	fb.transferModal = NewTransferModal(fb.app)
 
 	// Create recent directories tracker (Phase 4: data layer, Phase 5: popup UI)
-	fb.recentDirs = NewRecentDirs()
+	fb.recentDirs = NewRecentDirs(fb.log, fb.server.Host, fb.server.User)
 
 	// Wire onSelect callback: Hide -> NavigateTo -> Record -> SetFocus (D-10)
 	fb.recentDirs.SetOnSelect(func(path string) {
@@ -141,9 +141,8 @@ func (fb *FileBrowser) build() {
 	fb.localPane.OnPathChange(func(_ string) {
 		fb.app.Sync()
 	})
-	fb.remotePane.OnPathChange(func(path string) {
+	fb.remotePane.OnPathChange(func(_ string) {
 		fb.app.Sync()
-		fb.recentDirs.Record(path) // D-04: record path for recent dirs list
 	})
 
 	// Create status bar

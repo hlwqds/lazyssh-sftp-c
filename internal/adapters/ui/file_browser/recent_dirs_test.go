@@ -15,14 +15,42 @@
 package file_browser
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+	"go.uber.org/zap"
 )
+
+// newTestRecentDirs creates a RecentDirs for testing with a temp directory
+// to avoid polluting the real ~/.lazyssh/recent-dirs/ path.
+func newTestRecentDirs(t *testing.T) *RecentDirs {
+	t.Helper()
+	tmpDir := t.TempDir()
+	log := zap.NewNop().Sugar()
+	serverKey := "test@example.com"
+	filePath := filepath.Join(tmpDir, serverKey+".json")
+
+	rd := &RecentDirs{
+		paths:     make([]string, 0, maxRecentDirs),
+		visible:   false,
+		log:       log,
+		serverKey: serverKey,
+		filePath:  filePath,
+	}
+	rd.Box = tview.NewBox()
+	rd.SetBorder(true).
+		SetBorderColor(tcell.Color238).
+		SetTitleColor(tcell.Color250).
+		SetBackgroundColor(tcell.Color232)
+	return rd
+}
 
 // TestRecordSinglePath verifies that Record adds a path and GetPaths returns it.
 func TestRecordSinglePath(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/home/user/docs")
 	paths := rd.GetPaths()
 	if len(paths) != 1 || paths[0] != "/home/user/docs" {
@@ -32,7 +60,7 @@ func TestRecordSinglePath(t *testing.T) {
 
 // TestRecordMultiplePaths verifies MRU ordering after recording 3 different paths.
 func TestRecordMultiplePaths(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/home/user/docs")
 	rd.Record("/var/log")
 	rd.Record("/tmp/build")
@@ -50,7 +78,7 @@ func TestRecordMultiplePaths(t *testing.T) {
 
 // TestRecordMoveToFront verifies that re-recording an existing path moves it to front.
 func TestRecordMoveToFront(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Record("/a") // move /a to front
@@ -68,7 +96,7 @@ func TestRecordMoveToFront(t *testing.T) {
 
 // TestRecordTruncation verifies that the list is capped at maxRecentDirs (10).
 func TestRecordTruncation(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	for i := 0; i < 11; i++ {
 		rd.Record("/dir/" + string(rune('a'+i)))
 	}
@@ -87,7 +115,7 @@ func TestRecordTruncation(t *testing.T) {
 
 // TestRecordSkipsRelativePaths verifies that relative paths starting with "." are skipped.
 func TestRecordSkipsRelativePaths(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record(".")
 	rd.Record("./docs")
 	paths := rd.GetPaths()
@@ -98,7 +126,7 @@ func TestRecordSkipsRelativePaths(t *testing.T) {
 
 // TestRecordTrimsTrailingSlash verifies that trailing slashes are removed.
 func TestRecordTrimsTrailingSlash(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/home/user/")
 	paths := rd.GetPaths()
 	if len(paths) != 1 || paths[0] != "/home/user" {
@@ -108,7 +136,7 @@ func TestRecordTrimsTrailingSlash(t *testing.T) {
 
 // TestGetPathsEmpty verifies that GetPaths on empty RecentDirs returns empty slice.
 func TestGetPathsEmpty(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	paths := rd.GetPaths()
 	if len(paths) != 0 {
 		t.Errorf("expected 0 paths, got %v", paths)
@@ -118,7 +146,7 @@ func TestGetPathsEmpty(t *testing.T) {
 // TestRecordDuplicateDoesNotCreateDuplicates verifies that recording the same path
 // consecutively does not create duplicate entries.
 func TestRecordDuplicateDoesNotCreateDuplicates(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/home/user")
 	rd.Record("/home/user")
 	paths := rd.GetPaths()
@@ -132,7 +160,7 @@ func TestRecordDuplicateDoesNotCreateDuplicates(t *testing.T) {
 
 // TestHandleKeyNotVisible passes through events when popup is hidden.
 func TestHandleKeyNotVisible(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	ev := tcell.NewEventKey(tcell.KeyRune, 'j', 0)
 	result := rd.HandleKey(ev)
 	if result != ev {
@@ -142,7 +170,7 @@ func TestHandleKeyNotVisible(t *testing.T) {
 
 // TestHandleKeyEscHidesPopup verifies Esc hides the popup and consumes the event.
 func TestHandleKeyEscHidesPopup(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Show()
@@ -158,7 +186,7 @@ func TestHandleKeyEscHidesPopup(t *testing.T) {
 
 // TestHandleKeyEnterSelectsPath verifies Enter calls onSelect with selected path.
 func TestHandleKeyEnterSelectsPath(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Record("/c")
@@ -186,7 +214,7 @@ func TestHandleKeyEnterSelectsPath(t *testing.T) {
 
 // TestHandleKeyEnterEmptyList verifies Enter is a no-op when list is empty.
 func TestHandleKeyEnterEmptyList(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Show()
 
 	called := false
@@ -203,7 +231,7 @@ func TestHandleKeyEnterEmptyList(t *testing.T) {
 
 // TestHandleKeyJKNavigation verifies j/k rune keys move selection.
 func TestHandleKeyJKNavigation(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Record("/c")
@@ -247,7 +275,7 @@ func TestHandleKeyJKNavigation(t *testing.T) {
 
 // TestHandleKeyArrowNavigation verifies arrow keys move selection same as j/k.
 func TestHandleKeyArrowNavigation(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Show()
@@ -267,7 +295,7 @@ func TestHandleKeyArrowNavigation(t *testing.T) {
 
 // TestHandleKeyConsumesAllWhenVisible verifies all keys return nil when popup visible (D-08).
 func TestHandleKeyConsumesAllWhenVisible(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Show()
 
@@ -281,7 +309,7 @@ func TestHandleKeyConsumesAllWhenVisible(t *testing.T) {
 
 // TestShowResetsSelectedIndex verifies Show() resets selectedIndex to 0.
 func TestShowResetsSelectedIndex(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.Record("/a")
 	rd.Record("/b")
 	rd.Record("/c")
@@ -305,7 +333,7 @@ func TestShowResetsSelectedIndex(t *testing.T) {
 
 // TestSetCurrentPath verifies SetCurrentPath trims trailing slashes.
 func TestSetCurrentPath(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	rd.SetCurrentPath("/home/user/docs/")
 	if rd.GetCurrentPath() != "/home/user/docs" {
 		t.Errorf("expected \"/home/user/docs\", got %q", rd.GetCurrentPath())
@@ -314,7 +342,7 @@ func TestSetCurrentPath(t *testing.T) {
 
 // TestSetOnSelect verifies callback is stored and callable.
 func TestSetOnSelect(t *testing.T) {
-	rd := NewRecentDirs()
+	rd := newTestRecentDirs(t)
 	var received string
 	rd.SetOnSelect(func(path string) {
 		received = path
@@ -326,5 +354,89 @@ func TestSetOnSelect(t *testing.T) {
 	rd.HandleKey(enterEv)
 	if received != "/test" {
 		t.Errorf("expected \"/test\", got %q", received)
+	}
+}
+
+// TestPersistenceSaveAndLoad verifies that Record persists paths to disk
+// and a new RecentDirs instance can load them back.
+func TestPersistenceSaveAndLoad(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := zap.NewNop().Sugar()
+	serverKey := "persist@example.com"
+	filePath := filepath.Join(tmpDir, serverKey+".json")
+
+	// Create first instance and record paths
+	rd1 := &RecentDirs{
+		paths:     make([]string, 0, maxRecentDirs),
+		visible:   false,
+		log:       log,
+		serverKey: serverKey,
+		filePath:  filePath,
+	}
+	rd1.Box = tview.NewBox()
+	rd1.SetBorder(true).
+		SetBorderColor(tcell.Color238).
+		SetTitleColor(tcell.Color250).
+		SetBackgroundColor(tcell.Color232)
+
+	rd1.Record("/home/user/docs")
+	rd1.Record("/var/log/app")
+
+	// Verify file was created
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Fatal("expected persistence file to be created")
+	}
+
+	// Create second instance loading from same file
+	rd2 := &RecentDirs{
+		paths:     make([]string, 0, maxRecentDirs),
+		visible:   false,
+		log:       log,
+		serverKey: serverKey,
+		filePath:  filePath,
+	}
+	rd2.Box = tview.NewBox()
+	rd2.SetBorder(true).
+		SetBorderColor(tcell.Color238).
+		SetTitleColor(tcell.Color250).
+		SetBackgroundColor(tcell.Color232)
+	rd2.loadFromDisk()
+
+	paths := rd2.GetPaths()
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 loaded paths, got %d", len(paths))
+	}
+	if paths[0] != "/var/log/app" {
+		t.Errorf("expected first path \"/var/log/app\", got %q", paths[0])
+	}
+	if paths[1] != "/home/user/docs" {
+		t.Errorf("expected second path \"/home/user/docs\", got %q", paths[1])
+	}
+}
+
+// TestPersistenceMissingFile verifies that loading from a non-existent file
+// returns an empty paths list without error.
+func TestPersistenceMissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	log := zap.NewNop().Sugar()
+	filePath := filepath.Join(tmpDir, "nonexistent@example.com.json")
+
+	rd := &RecentDirs{
+		paths:     make([]string, 0, maxRecentDirs),
+		visible:   false,
+		log:       log,
+		serverKey: "nonexistent@example.com",
+		filePath:  filePath,
+	}
+	rd.Box = tview.NewBox()
+	rd.SetBorder(true).
+		SetBorderColor(tcell.Color238).
+		SetTitleColor(tcell.Color250).
+		SetBackgroundColor(tcell.Color232)
+	rd.loadFromDisk()
+
+	paths := rd.GetPaths()
+	if len(paths) != 0 {
+		t.Errorf("expected 0 paths for missing file, got %v", paths)
 	}
 }
