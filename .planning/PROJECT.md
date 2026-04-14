@@ -36,9 +36,21 @@
 - ✓ 跨平台文件权限（Windows/macOS/Linux）— v1.0
 - ✓ 取消后部分文件清理（D-04）— v1.0
 
+## Current Milestone: v1.1 Recent Remote Directories
+
+**Goal:** 在文件浏览器的远程面板中，记录并快速重新访问最近浏览过的远程目录。
+
+**Target features:**
+- 按 `r` 键弹出最近访问的远程目录列表（最近 10 条）
+- 记录粒度为「本机目录 + 服务器」组合
+- 弹出式列表交互（j/k 选择，Enter 跳转，Esc 关闭）
+- 仅内存中保存，退出后清空
+
 ### Active
 
-(无 — v1.0 所有需求已实现)
+- 最近远程目录记录（按本机目录 + 服务器分组，最多 10 条）
+- 快捷键 `r` 弹出历史目录列表
+- 弹出式列表交互（j/k 导航，Enter 跳转，Esc 关闭）
 
 ### Out of Scope
 
@@ -97,4 +109,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after v1.0 milestone*
+*Last updated: 2026-04-14 — v1.1 milestone started*
