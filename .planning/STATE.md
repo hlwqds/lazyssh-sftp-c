@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 Phase: 05
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-04-14
+Last activity: 2026-04-14 - Completed quick task 260414-od1: Fix recent remote dirs
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -82,6 +82,12 @@ None yet.
 - TransferModal 实际渲染路径未确认 — FileBrowser.Draw() 中未发现 TransferModal.Draw() 调用，Phase 5 实施前需验证 overlay 渲染机制
 - `r` 键与 TransferModal modeConflictDialog 的 Rename 冲突 — 弹窗可见性检查必须在按键处理之前
 - NavigateToParent onPathChange 修复后 app.Sync() 行为变化 — 需确认是否影响终端标题更新
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260414-od1 | Fix recent remote dirs: record absolute paths and record on transfer | 2026-04-14 | 1e30d29 | [260414-od1-fix-recent-remote-dirs-record-absolute-p](./quick/260414-od1-fix-recent-remote-dirs-record-absolute-p/) |
 
 ## Session Continuity
 
