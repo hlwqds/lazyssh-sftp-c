@@ -128,8 +128,11 @@ Plans:
   2. 复制/移动大文件或目录时显示进度条，复用 TransferModal 或状态栏进度显示
   3. 目标目录存在同名文件时弹出冲突对话框（覆盖/跳过/重命名），多文件操作时每个冲突文件单独询问
   4. 移动操作失败时（如权限不足），源文件保留不变，用户收到错误提示
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md -- OpMove + modeMove + [M] prefix + handleMove + x key + status bar hints
+- [ ] 08-02-PLAN.md -- handlePaste refactor: conflict dialog + move dispatch + handleLocalMove/handleRemoteMove + cleanup
 
 ## Progress
 
@@ -140,6 +143,6 @@ Phases execute in numeric order: 6 -> 7 -> 8
 |-------|-----------|----------------|--------|-----------|
 | 6. Basic File Operations | v1.2 | 2/3 | Complete    | 2026-04-15 |
 | 7. Copy & Clipboard | v1.2 | 0/2 | Not started | - |
-| 8. Move & Integration | v1.2 | 0/? | Not started | - |
+| 8. Move & Integration | v1.2 | 0/2 | Not started | - |
 
 Full details: .planning/milestones/v1.0-ROADMAP.md, .planning/milestones/v1.1-ROADMAP.md
