@@ -1121,6 +1121,8 @@ func (fb *FileBrowser) getActiveSelection() (int, int) {
 }
 
 // getActiveCell returns the TableCell at the given row and column in the active pane.
+//
+//nolint:unparam // col is always 0 but kept for table cell API consistency
 func (fb *FileBrowser) getActiveCell(row, col int) *tview.TableCell {
 	if fb.activePane == 0 {
 		return fb.localPane.GetCell(row, col)

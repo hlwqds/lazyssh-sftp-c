@@ -15,6 +15,7 @@
 package file_browser
 
 import (
+	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -54,8 +55,20 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		}
 		// D-05, CLP-03: clear clipboard before closing browser
 		if fb.clipboard.Active {
+			// Save cursor position before clearing [C] prefix
+			row, _ := fb.getActiveSelection()
+			cell := fb.getActiveCell(row, 0)
+			var focusName string
+			if cell != nil {
+				if fi, ok := cell.GetReference().(domain.FileInfo); ok {
+					focusName = fi.Name
+				}
+			}
 			fb.clipboard = Clipboard{}
 			fb.refreshPane(fb.activePane)
+			if focusName != "" {
+				fb.focusOnItem(fb.activePane, focusName)
+			}
 			fb.updateStatusBarTemp("[#00FF7F]Clipboard cleared[-]")
 			return nil
 		}
