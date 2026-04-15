@@ -32,9 +32,9 @@
 
 **Coverage:**
 - v1.3 requirements: 4 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 4
+- Mapped to phases: 4/4
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-15*
-*Last updated: 2026-04-15 after initial definition*
+*Last updated: 2026-04-15 — traceability updated after roadmap creation*

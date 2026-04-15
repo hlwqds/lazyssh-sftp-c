@@ -5,6 +5,7 @@
 - **v1.0 File Transfer** - Phases 1-3 (shipped 2026-04-13)
 - **v1.1 Recent Remote Directories** - Phases 4-5 (shipped 2026-04-14)
 - **v1.2 File Operations** - Phases 6-8 (shipped 2026-04-15)
+- **v1.3 Dup SSH Connection** - Phase 9 (in progress)
 
 ## Phases
 
@@ -33,6 +34,12 @@
 - [x] Phase 8: Move & Integration (2/2 plans) - completed 2026-04-15
 
 </details>
+
+### v1.3 Dup SSH Connection (In Progress)
+
+**Milestone Goal:** 服务器列表支持快速复制连接配置，一键创建新条目
+
+- [ ] **Phase 9: Dup SSH Connection** - 服务器列表 D 键复制当前服务器配置创建新条目
 
 ## Phase Details
 
@@ -118,6 +125,32 @@ Plans:
 
 </details>
 
+### Phase 9: Dup SSH Connection
+**Goal**: 用户可以在服务器列表中按 D 键快速复制当前选中服务器的配置，自动生成唯一别名后打开编辑表单
+**Depends on**: Nothing (uses existing ServerService.AddServer and ServerForm)
+**Requirements**: DUP-01, DUP-02, DUP-03, DUP-04
+**Success Criteria** (what must be TRUE):
+  1. 用户在服务器列表选中某个服务器后按 D 键，列表中出现一个新的服务器条目，其配置与原服务器相同
+  2. 新条目的别名自动生成唯一后缀（原名-copy、原名-copy-2 等），不与已有条目冲突
+  3. 按 D 键后自动打开 ServerForm 编辑表单，用户可修改任意字段后保存为新条目
+  4. 新条目不继承原条目的运行时元数据（ping 状态、置顶时间、SSH 连接计数等）
+**Plans**: TBD
+
+Plans:
+- [ ] 09-01: TBD
+
 ## Progress
 
 Full details: .planning/milestones/v1.0-ROADMAP.md, .planning/milestones/v1.1-ROADMAP.md, .planning/milestones/v1.2-ROADMAP.md
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Foundation | v1.0 | 3/3 | Complete | 2026-04-13 |
+| 2. Core Transfer | v1.0 | 3/3 | Complete | 2026-04-13 |
+| 3. Polish | v1.0 | 3/3 | Complete | 2026-04-13 |
+| 4. Directory History Core | v1.1 | 2/2 | Complete | 2026-04-14 |
+| 5. Recent Directories Popup | v1.1 | 1/1 | Complete | 2026-04-14 |
+| 6. Basic File Operations | v1.2 | 3/3 | Complete | 2026-04-15 |
+| 7. Copy & Clipboard | v1.2 | 2/2 | Complete | 2026-04-15 |
+| 8. Move & Integration | v1.2 | 2/2 | Complete | 2026-04-15 |
+| 9. Dup SSH Connection | v1.3 | 0/1 | Not started | - |
