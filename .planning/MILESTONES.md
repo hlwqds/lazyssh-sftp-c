@@ -1,5 +1,22 @@
 # Milestones
 
+## v1.3 Dup SSH Connection (Shipped: 2026-04-15)
+
+**Phases completed:** 4 phases, 8 plans, 14 tasks
+
+**Key accomplishments:**
+
+- FileService interface extended with 5 file management methods (Remove/RemoveAll/Rename/Mkdir/Stat), implemented in both LocalFS and SFTPClient adapters with compile-time satisfaction checks
+- Two independent overlay components (ConfirmDialog + InputDialog) following established RecentDirs/TransferModal pattern, with InputField key routing via InputHandler() without tview focus system
+- Dual-pane file browser with delete (single/multi-select/recursive), rename with conflict detection, and mkdir with cursor positioning, all using ConfirmDialog/InputDialog overlays
+- Local Copy/CopyDir with permission+mtime preservation (D-07), remote CopyRemoteFile/CopyRemoteDir via download+re-upload (D-01)
+- Full clipboard copy/paste feature: c to mark files with green [C] prefix, p to paste locally (instant) or remotely (TransferModal modeCopy progress), Esc to clear clipboard without closing browser
+- Move marking UI with x key, [M] red prefix rendering, modeMove TransferModal, and extended clipboardProvider 4-tuple for operation-aware prefix display
+- handlePaste refactored with conflict dialog for all paste operations, move dispatch (OpMove), handleSameDirMove (atomic Rename), handleLocalMove (Copy+Delete+cleanup), and handleRemoteMove (modeMove progress + delete source + cleanup)
+- D key (Shift+d) server duplication with deep copy, unique -copy alias suffix, runtime metadata clearing, and post-save list auto-scroll
+
+---
+
 ## v1.2 File Operations (Shipped: 2026-04-15)
 
 **Phases completed:** 3 phases, 7 plans, 12 tasks

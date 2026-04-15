@@ -82,6 +82,79 @@
 - Sessions: 1 (single-day milestone)
 - Notable: Small milestone (2 phases) completed efficiently with research + UI-spec front-loading
 
+## Milestone: v1.2 — File Operations
+
+**Shipped:** 2026-04-15
+**Phases:** 3 | **Plans:** 7 | **Tasks:** 12
+
+### What Was Built
+- FileService interface with 5 file management methods (Remove/RemoveAll/Rename/Mkdir/Stat) implemented in both LocalFS and SFTPClient
+- ConfirmDialog + InputDialog overlay components following RecentDirs/TransferModal pattern
+- Dual-pane delete (single/multi-select/recursive), rename with conflict detection, mkdir with cursor positioning
+- Local Copy/CopyDir with permission+mtime preservation, remote CopyRemoteFile/CopyRemoteDir via download+re-upload
+- Clipboard copy/paste (c mark + p paste, [C] green prefix, TransferModal modeCopy)
+- Move marking (x mark, [M] red prefix, modeMove, handlePaste refactor with conflict dialog for all operations)
+
+### What Worked
+- FileService as unified interface eliminated type-switching in UI layer — same code paths for local and remote
+- clipboardProvider 4-tuple pattern made operation-aware rendering trivial across panes
+- modeMove reusing drawProgress path from modeCopy — zero new rendering code for move progress
+- TDD approach (RED+GREEN) for FileService extension caught interface satisfaction issues early
+
+### What Was Inefficient
+- SFTPClient missing Copy/CopyDir stubs broke compile-time interface check — discovered during build, not planning
+- Test mocks needed updating across multiple test files when FileService interface extended
+- sed-based editing for tab-indented code blocks that Edit tool couldn't match
+
+### Patterns Established
+- FileService as unified file operations interface for UI-layer uniformity
+- clipboardProvider 4-tuple (bool, string, string, ClipboardOp) for operation-aware rendering
+- Remote copy via download+re-upload with temp file/directory cleanup
+- SFTP protocol stub methods returning sentinel errors for unsupported operations
+
+### Key Lessons
+1. Extending a Go interface requires updating ALL implementations including test mocks — plan for this
+2. SFTP protocol limitations (no native copy) should be documented in research, not discovered during execution
+3. Move and Copy share enough rendering infrastructure that modeMove should reuse modeCopy draw paths
+
+### Cost Observations
+- Model mix: sonnet (executor), opus (orchestrator/verifier)
+- Sessions: ~2 (file operations + copy/clipboard + move split across sessions)
+- Notable: 3-phase milestone with heavy interface extension work, mock updates were recurring overhead
+
+---
+
+## Milestone: v1.3 — Dup SSH Connection
+
+**Shipped:** 2026-04-15
+**Phases:** 1 | **Plans:** 1 | **Tasks:** 2
+
+### What Was Built
+- D key (Shift+d) server duplication with deep copy of all configuration fields
+- generateUniqueAlias() with -copy, -copy-2, ... suffix logic avoiding conflicts
+- dupPendingAlias pattern for post-save list auto-scroll to new entry
+- Status bar and server details D key hints
+
+### What Worked
+- Single-plan milestone — minimal overhead, direct execution
+- Reused existing ServerService.AddServer and ServerForm — no new components needed
+- Deep copy of slice fields prevented shared reference bugs between original and duplicate
+
+### What Was Inefficient
+- None — plan executed exactly as written with zero deviations
+
+### Patterns Established
+- dupPendingAlias field on tui struct to bridge form open/save gap for auto-scroll
+
+### Key Lessons
+1. Small, well-scoped milestones (1 phase, 1 plan) can ship in minutes with zero friction
+2. Pre-existing infrastructure (ServerService, ServerForm) makes new features trivial when architecture is clean
+
+### Cost Observations
+- Model mix: sonnet (executor), opus (orchestrator)
+- Sessions: 1 (single session, 2 min execution)
+- Notable: Fastest milestone yet — clean architecture and existing components made this trivial
+
 ---
 
 ## Cross-Milestone Trends
@@ -92,6 +165,8 @@
 |-----------|----------|--------|------------|
 | v1.0 | 1 | 3 | Initial project, established patterns |
 | v1.1 | 1 | 2 | Small focused milestone, overlay pattern reuse |
+| v1.2 | 2 | 3 | Heavy interface extension, file operations |
+| v1.3 | 1 | 1 | Minimal milestone, clean architecture payoff |
 
 ### Cumulative Quality
 
@@ -99,9 +174,14 @@
 |-----------|-------|-------------------|
 | v1.0 | 23 | go vet clean, all platforms compile |
 | v1.1 | 28 | +5 tests, TransferModal.Draw() bug fix |
+| v1.2 | ~35 | +7 tests, FileService unified interface |
+| v1.3 | ~35 | Zero deviations, 2min execution |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Port/Adapter decoupling enables fast feature iteration without cross-layer regressions
 2. Plan checking before execution prevents scope gaps
 3. Context cancellation should be designed in from the start, not bolted on later
+4. Extending Go interfaces requires updating ALL implementations including test mocks
+5. Clean architecture makes single-plan milestones trivial when reusing existing components
+6. Small, well-scoped milestones reduce friction to near-zero

@@ -8,12 +8,9 @@
 
 在终端内完成 SSH 文件传输和文件管理，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、操作，全部键盘驱动。
 
-## Current Milestone: v1.3 Dup SSH Connection
+## Current Milestone
 
-**Goal:** 服务器列表支持快速复制连接配置，一键创建新条目
-
-**Target features:**
-- Dup SSH 连接（服务器列表 D 键复制当前服务器配置创建新条目）
+No active milestone. Run `/gsd:new-milestone` to start v1.4.
 
 ## Current State
 
