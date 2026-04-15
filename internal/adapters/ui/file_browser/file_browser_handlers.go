@@ -52,6 +52,13 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 			fb.transferModal.HandleKey(event) // delegates to modal's HandleKey
 			return nil
 		}
+		// D-05, CLP-03: clear clipboard before closing browser
+		if fb.clipboard.Active {
+			fb.clipboard = Clipboard{}
+			fb.refreshPane(fb.activePane)
+			fb.updateStatusBarTemp("[#00FF7F]Clipboard cleared[-]")
+			return nil
+		}
 		fb.close()
 		return nil
 	case tcell.KeyF5:
@@ -67,6 +74,12 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case 'm':
 		fb.handleMkdir()
+		return nil
+	case 'c':
+		fb.handleCopy()
+		return nil
+	case 'p':
+		fb.handlePaste()
 		return nil
 	case 'r':
 		if fb.activePane == 1 && fb.remotePane.IsConnected() {
