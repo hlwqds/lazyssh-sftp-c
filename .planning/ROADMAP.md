@@ -132,7 +132,7 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md -- OpMove + modeMove + [M] prefix + handleMove + x key + status bar hints
-- [ ] 08-02-PLAN.md -- handlePaste refactor: conflict dialog + move dispatch + handleLocalMove/handleRemoteMove + cleanup
+- [x] 08-02-PLAN.md -- handlePaste refactor: conflict dialog + move dispatch + handleLocalMove/handleRemoteMove + cleanup
 
 ## Progress
 

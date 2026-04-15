@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: File Operations
-status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-04-15T07:59:44.827Z"
+status: verifying
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-04-15T08:06:29.650Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 8
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 38
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Phase: 08 (move-integration) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-15
 
 Progress: [████████████░░░░░░░░░░] 38% (5/8 phases shipped)
@@ -56,6 +56,7 @@ Progress: [████████████░░░░░░░░░░] 3
 | Phase 07 P01 | 6min | 2 tasks | 7 files |
 | Phase 07 P02 | 9min | 2 tasks | 5 files |
 | Phase 08 P01 | 473 | 1 tasks | 5 files |
+| Phase 08 P02 | 184 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase 08]: clipboardProvider extended to 4-tuple (bool, string, string, ClipboardOp) for [M]/[C] prefix distinction
 - [Phase 08]: modeMove reuses drawProgress render path identically to modeCopy
 - [Phase 08]: [M] uses red (#FF6B6B) to visually distinguish from [C] green (#00FF7F)
+- [Phase 08]: handlePaste wraps ALL logic in goroutine for buildConflictHandler channel sync (D-09)
+- [Phase 08]: Same-directory auto-rename replaced by conflict dialog for all paste operations (D-01)
+- [Phase 08]: handleLocalPaste goroutine wrapper removed -- already inside handlePaste goroutine
 
 ### Pending Todos
 
@@ -95,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T07:59:44.825Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-04-15T08:06:29.648Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
