@@ -191,7 +191,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 12-01-PLAN.md — DualRemoteFileBrowser 组件（布局 + 并行 SFTP 连接 + 键盘导航 + 文件操作 + 入口接线）
+- [x] 12-01-PLAN.md — DualRemoteFileBrowser 组件（布局 + 并行 SFTP 连接 + 键盘导航 + 文件操作 + 入口接线）
 **UI hint**: yes
 
 ### Phase 13: Cross-Remote Transfer
@@ -228,5 +228,5 @@ Phases execute in numeric order: 10 -> 11 -> 12 -> 13
 | 9. Dup SSH Connection | v1.3 | 1/1 | Complete | 2026-04-15 |
 | 10. Dup Fix | v1.4 | 1/1 | Complete    | 2026-04-15 |
 | 11. T Key Marking | v1.4 | 1/1 | Complete    | 2026-04-15 |
-| 12. Dual Remote Browser | v1.4 | 0/? | Not started | - |
+| 12. Dual Remote Browser | v1.4 | 1/1 | Complete   | 2026-04-15 |
 | 13. Cross-Remote Transfer | v1.4 | 0/? | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Dup Fix & Dual Remote Transfer
 status: verifying
-stopped_at: Phase 12 context gathered
-last_updated: "2026-04-15T16:20:13.177Z"
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-04-15T16:53:24.647Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 13
-  completed_phases: 6
-  total_plans: 10
-  completed_plans: 10
+  completed_phases: 7
+  total_plans: 11
+  completed_plans: 11
   percent: 100
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在终端内完成 SSH 文件传输和文件管理，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、操作，全部键盘驱动。
-**Current focus:** Phase 11 — t-key-marking
+**Current focus:** Phase 12 — dual-remote-browser
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
+Phase: 12 (dual-remote-browser) — EXECUTING
+Plan: 1 of 1
 Status: Phase complete — ready for verification
 Last activity: 2026-04-15
 
@@ -52,6 +52,7 @@ Progress: [██████████] 100%
 *Updated after each plan completion*
 | Phase 10 P01 | 2min | 1 tasks | 2 files |
 | Phase 11 P01 | 2min | 3 tasks | 6 files |
+| Phase 12 P01 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - [Phase 11]: MarkStateGetter callback pattern decouples ServerList from tui mark state
 - [Phase 11]: Esc priority: markClearer checked before onReturnToSearch to allow clearing marks without leaving list
 - [Phase 11]: Alias matching for mark identification (sufficient for uniqueness per SSH config)
+- [Phase 12]: DualRemoteFileBrowser is standalone component (not reusing FileBrowser) per CONTEXT D-01
+- [Phase 12]: Two independent sftp_client.New() instances per CONTEXT D-02 (not shared tui.sftpService)
+- [Phase 12]: Own ConfirmDialog/InputDialog instances per CONTEXT D-05 (Pitfall 3)
 
 ### Pending Todos
 
@@ -81,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T16:20:13.174Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-dual-remote-browser/12-CONTEXT.md
+Last session: 2026-04-15T16:53:24.643Z
+Stopped at: Completed 12-01-PLAN.md
+Resume file: None

@@ -20,10 +20,10 @@
 
 ### Dual Remote Browser
 
-- [ ] **DRB-01**: 创建独立的 DualRemoteFileBrowser 组件（不复用 FileBrowser），左栏为远端 A（源端），右栏为远端 B（目标端）
-- [ ] **DRB-02**: 双栏复用 RemotePane 组件，各自持有独立的 SFTPClient 实例
-- [ ] **DRB-03**: 支持键盘导航（Tab 切换面板、上下左右浏览、Enter 进入目录、h 返回上级）
-- [ ] **DRB-04**: 退出浏览器（Esc/q）时关闭两个 SFTP 连接并清理资源
+- [x] **DRB-01**: 创建独立的 DualRemoteFileBrowser 组件（不复用 FileBrowser），左栏为远端 A（源端），右栏为远端 B（目标端）
+- [x] **DRB-02**: 双栏复用 RemotePane 组件，各自持有独立的 SFTPClient 实例
+- [x] **DRB-03**: 支持键盘导航（Tab 切换面板、上下左右浏览、Enter 进入目录、h 返回上级）
+- [x] **DRB-04**: 退出浏览器（Esc/q）时关闭两个 SFTP 连接并清理资源
 
 ### Cross-Remote Transfer
 
@@ -57,10 +57,10 @@
 | MARK-03 | Phase 11 | Complete |
 | MARK-04 | Phase 11 | Complete |
 | MARK-05 | Phase 11 | Complete |
-| DRB-01 | Phase 12 | Pending |
-| DRB-02 | Phase 12 | Pending |
-| DRB-03 | Phase 12 | Pending |
-| DRB-04 | Phase 12 | Pending |
+| DRB-01 | Phase 12 | Complete |
+| DRB-02 | Phase 12 | Complete |
+| DRB-03 | Phase 12 | Complete |
+| DRB-04 | Phase 12 | Complete |
 | XFR-01 | Phase 13 | Pending |
 | XFR-02 | Phase 13 | Pending |
 | XFR-03 | Phase 13 | Pending |
