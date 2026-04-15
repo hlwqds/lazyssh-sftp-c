@@ -116,7 +116,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- FileService/TransferService port 扩展 + LocalFS/transfer adapter 实现
+- [x] 07-01-PLAN.md -- FileService/TransferService port 扩展 + LocalFS/transfer adapter 实现
 - [ ] 07-02-PLAN.md -- Clipboard UI：handleCopy/handlePaste + [C] 前缀 + TransferModal modeCopy + Esc 清除
 
 ### Phase 8: Move & Integration

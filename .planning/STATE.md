@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: File Operations
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-04-15T02:59:11.418Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-04-15T03:44:35.328Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 5
+  completed_plans: 4
   percent: 38
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、传输，全部键盘驱动。
-**Current focus:** Phase 6 — basic-file-operations
+**Current focus:** Phase 07 — copy-clipboard
 
 ## Current Position
 
-Phase: 7 of 8 (copy & clipboard)
-Plan: Not started
+Phase: 07 (copy-clipboard) — EXECUTING
+Plan: 2 of 2
 Status: Ready to execute
 Last activity: 2026-04-15
 
@@ -53,6 +53,7 @@ Progress: [████████████░░░░░░░░░░] 3
 | Phase 06 P01 | 3min | 1 tasks | 7 files |
 | Phase 06 P02 | 206s | 2 tasks | 4 files |
 | Phase 06 P03 | 290s | 3 tasks | 2 files |
+| Phase 07 P01 | 6min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [Phase 06]: InputDialog highest overlay priority -- text input must consume all keys
 - [Phase 06]: All file operations (delete/rename/mkdir) execute in goroutines with QueueUpdateDraw for non-blocking UI
 - [Phase 06]: Rename conflict uses two-step flow: InputDialog -> Stat -> ConfirmDialog (no simultaneous overlays)
+- [Phase 07]: SFTPClient Copy/CopyDir return sentinel error (SFTP protocol has no native copy)
+- [Phase 07]: Remote copy uses download+re-upload with temp file/directory and defer cleanup (D-01, Pitfall 3)
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T02:59:11.416Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-copy-clipboard/07-CONTEXT.md
+Last session: 2026-04-15T03:44:35.325Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None
