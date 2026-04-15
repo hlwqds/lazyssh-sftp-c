@@ -1,191 +1,145 @@
 # Project Research Summary
 
-**Project:** LazySSH File Transfer -- v1.2 File Management Operations
-**Domain:** TUI 双面板 SFTP 文件浏览器中的文件管理操作（删除/重命名/新建/复制/移动）
+**Project:** LazySSH File Transfer
+**Domain:** TUI SSH Manager -- Enhanced File Browser (v1.3)
 **Researched:** 2026-04-15
 **Confidence:** HIGH
 
 ## Executive Summary
 
-v1.2 为 LazySSH 的双栏文件浏览器添加五种文件管理操作：删除（d）、重命名（R）、新建目录（m）、复制（c+p）、移动（x+p）。研究结论非常明确：**零新外部依赖**。所有操作所需的原语已存在于 `pkg/sftp v1.13.10`（当前为 indirect 依赖）和 Go 标准库 `os` 包中。唯一需要做的是将 `pkg/sftp` 从 `go.mod` 的 indirect 改为 direct 依赖。
+v1.3 为 lazyssh 的终端文件浏览器添加三个独立增强功能：本地路径历史持久化、Dup SSH 连接复制、双远端文件互传。所有三个功能都基于现有技术栈实现，**零新外部依赖**。核心发现是这三个功能完全独立，可以按任意顺序构建，但按复杂度递增排序（Dup -> 本地路径 -> 双远端）能最大化早期交付并降低风险。
 
-架构方面，v1.2 遵循已有的 Clean Architecture 层次扩展：(1) Port 层将 `Remove`/`Stat` 从 `SFTPService` 下沉到 `FileService`，使本地面板和远程面板共享统一操作接口；(2) 新增 `CopyService` 接口处理同面板内的文件复制（需要 context 取消、进度回调和冲突处理，与 FileService 的简单 CRUD 语义不同）；(3) UI 层新增两个 overlay 组件（`ConfirmDialog` 和 `InputDialog`），严格遵循 `TransferModal`/`RecentDirs` 已建立的 overlay 模式。复制/移动采用 mark-put 模型（ranger/vifm/lf 风格），剪贴板状态存储在 `FileBrowser` 中（跨面板可见性所需）。
+关键架构决策已经明确：(1) 本地路径历史需要独立于现有 `RecentDirs` 的数据层（全局而非按服务器），存储在 `~/.lazyssh/local-path-history.json`；(2) Dup SSH 因为 `d` 键已被删除功能占用，必须使用不同快捷键（推荐 `D` 或 `y`）；(3) 双远端传输需要全新的 `DualRemoteFileBrowser` 组件和 `RelayTransferService`，而非修改现有 `FileBrowser`。最大风险是双远端传输的架构复杂度——同时管理两个 SFTP 连接、本地临时文件中转、分阶段进度显示。所有风险都有明确的缓解策略，基于 v1.0-v1.2 的实际踩坑经验。
 
-关键风险集中在四个领域：(1) SFTP 协议没有原生 copy 操作，远程面板内复制必须 download+reupload，大文件会慢；(2) `SFTP Remove` 不能删除非空目录，需要使用 `RemoveAll`；(3) 所有递归操作（删除目录、复制目录）必须在 goroutine 中执行并显示进度，否则阻塞 UI；(4) 快捷键冲突 -- 新增的 d/R/m/c/x/p 键必须检查 overlay 可见性后再处理。这些风险都有明确的预防策略，且现有代码中已有正确的 goroutine + QueueUpdateDraw 模式可以复用。
+主要风险在于双远端传输的本地磁盘空间需求（下载到临时目录再上传）和 SSH 密码认证导致的 goroutine 阻塞。这些风险都有成熟缓解方案：传输前检查磁盘空间、设置连接超时、确保进程清理。`scp -3` 方案因无进度条被排除，确认采用 download-to-temp + re-upload 的两阶段方案。
 
 ## Key Findings
 
 ### Recommended Stack
 
-**零新增外部依赖。** 所有文件管理操作的技术原语已存在于项目中或 Go 标准库中。
+**零新外部依赖。** 三个功能所需的所有技术原语已在当前技术栈中：
 
-**核心技术（均已有）：**
-- `pkg/sftp v1.13.10`: 远程文件操作原语 -- 提供 Remove、RemoveAll、Rename、Mkdir、Stat 等全部所需方法，仅需将 indirect 改为 direct 依赖
-- `os` 标准库: 本地文件操作 -- Remove、RemoveAll、Rename、Mkdir、Stat，全部一行代理
-- `tview.InputField`: 文本输入组件 -- 用于重命名和新建目录的输入框，已在 ServerForm 中使用
-- `context.Context`: 异步操作取消 -- 用于递归删除和复制的 goroutine 控制
-
-**新增接口：**
-- `CopyService`: 同面板内文件复制接口 -- 独立于 FileService，因为需要 context、进度回调和冲突处理
+- **Go 标准库** (`encoding/json`, `os`, `path/filepath`) — 本地路径历史持久化，复用现有 `metadata.json` 模式
+- **现有 TransferService 两阶段模式** (`CopyRemoteFile`) — 双远端传输的基础模式，download-to-temp + re-upload
+- **独立 SFTPClient 实例** — 双远端需要两个独立 `sftp_client.New(log)` 连接，不经过 `cmd/main.go` 单例
+- **tview overlay 组件模式** (`RecentDirs`, `InputDialog`) — 所有 UI 交互复用已有模式
 
 ### Expected Features
 
-**Must have（table stakes）-- 缺少任何一个都会让文件浏览器感觉不完整：**
-- 删除文件/目录（d 键）-- 单文件、递归目录、多选批量删除，带确认对话框
-- 重命名（R 键）-- 内联编辑 InputField，预填当前文件名，选中文件名茎（不含扩展名）
-- 新建目录（m 键）-- InputField 弹窗，支持嵌套路径创建
-- 复制标记+粘贴（c+p）-- 同面板复制 + 跨面板传输（复用 TransferService）
-- 移动标记+粘贴（x+p）-- 同面板移动 + 跨面板传输+删除源文件
+**Must have (table stakes):**
+- 本地路径历史持久化 — JSON 存储，MRU 弹出列表，`r` 键（本地面板）
+- Dup SSH 连接 — 一键复制服务器配置，alias 去重，metadata 清除
+- 双远端文件浏览器 — 两台服务器的双 RemotePane 布局
+- 双远端文件传输 — download-to-temp + re-upload，分阶段进度显示，取消支持
 
-**Should have（差异化）：**
-- 统一的 c/x/p 模型 -- 将本地复制和跨面板传输统一在一个心智模型下，比 mc 的 F5/F6 更灵活
-- 状态栏标记提示 -- 标记后显示 "3 file(s) marked for copy"
-- 递归删除范围显示 -- 确认对话框显示文件数和总大小
+**Should have (competitive):**
+- 分阶段进度显示（Phase 1/2: Download, Phase 2/2: Upload）— 比 `scp -3`（无进度条）的显著优势
+- 键盘驱动的服务器选择流程 — 比 Termius/MC 的鼠标操作更适合终端用户
+- Alias 递增后缀策略 — 连续 Dup 同一服务器不会产生冲突
 
-**Defer（v2+）：**
-- Undo 撤销 -- 需要操作日志和反向执行，SFTP 无事务支持，复杂度高
-- 批量重命名（正则/编号）-- 需要模式语法，复杂度高
-- 文件权限编辑 -- 跨平台差异大，远程 chmod 支持不确定
-- Trash/回收站集成 -- `trash-cli` 非系统自带，远程 SFTP 无 trash 概念
+**Defer (v2+):**
+- 流式中转（边下载边上传）— 减少磁盘占用但增加复杂度
+- 双远端文件管理（删除/重命名/mkdir）— v1.x 考虑
+- Named bookmarks（命名书签）— MRU 已足够
+- Dup 字段对比编辑器 — 复制后用 `e` 编辑即可
 
 ### Architecture Approach
 
-v1.2 通过三层扩展集成到现有 Clean Architecture 中。
+三个功能对应三个架构层级的影响：(1) 本地路径历史需要新的 Port 接口 (`PathHistoryService`) 和数据适配器 + UI overlay 组件；(2) Dup SSH 是纯 TUI 层功能，零 Port/Adapter 变更，仅 ~50 行 handler 代码；(3) 双远端传输需要全新的 `RelayTransferService` 接口和 `DualRemoteFileBrowser` 根组件，是 v1.3 中最大的架构变更。
 
-**主要组件：**
-1. **FileService 接口扩展** -- 将 Remove、RemoveAll、Rename、Mkdir、Stat 提升到共享接口，LocalFS 和 SFTPClient 都实现，UI 层无需类型判断
-2. **CopyService 接口（新增）** -- 独立接口处理同面板文件复制，需要 context 取消、进度回调和冲突处理；两个实现：LocalCopyService 和 RemoteCopyService
-3. **ConfirmDialog overlay（新增）** -- 可复用的确认对话框，用于删除确认和危险操作确认
-4. **InputDialog overlay（新增）** -- 可复用的文本输入弹窗，嵌入 tview.InputField，用于重命名和新建目录
-5. **Clipboard 状态（新增）** -- 纯状态结构体，存储在 FileBrowser 中，管理复制/移动的标记状态
+关键设计原则：不修改现有 `FileBrowser`（双远端用独立组件）、不修改现有 `TransferService`（中转用独立 service）、不在 `cmd/main.go` 创建 RelayTransferService（运行时动态创建，因为服务器对由 UI 选择决定）。
 
-**关键设计决策：**
-- 剪贴板状态在 FileBrowser 而非面板中 -- 跨面板操作需要 FileBrowser 级别的可见性
-- 同面板复制用 CopyService，跨面板复制复用 TransferService -- 最大化代码复用
-- copyWithProgress 从 transfer_service.go 提取为共享工具函数 -- 避免三份相同代码
-- 所有 overlay 遵循互斥原则 -- 同一时间只有一个 overlay 可见，避免按键路由歧义
+**Major components:**
+1. **PathHistoryService** — 本地路径 MRU 的纯数据层 Port，JSON 持久化到 `~/.lazyssh/local-path-history.json`
+2. **LocalRecentDirs** — 本地面板的路径历史弹出 overlay，复用 RecentDirs 的 Draw/HandleKey 模式
+3. **handleServerDup** — Dup SSH handler，组合 `ListServers` + 修改 alias + `AddServer`
+4. **RelayTransferService** — 双远端传输服务 Port，接收两个独立 SFTP 连接，编排两阶段传输
+5. **DualRemoteFileBrowser** — 新的根 UI 组件，两个 RemotePane + TransferModal，独立于 FileBrowser
+6. **ServerPickerOverlay** — 服务器选择弹出层，复用 overlay 模式，支持过滤和键盘导航
 
 ### Critical Pitfalls
 
-1. **SFTP 协议没有原生 copy** -- 远程面板内复制必须 download 到临时文件 + upload 到目标路径，大文件慢。预防：复用 TransferService 模式，在 UI 中提示用户远程复制需经过本地中转
-2. **SFTP Remove 不能删除非空目录** -- 需要使用 `RemoveAll()` 递归删除。预防：在 SFTPService port 接口中暴露 RemoveAll 方法
-3. **递归操作阻塞 UI** -- 大型目录删除/复制如果同步执行会冻结终端。预防：所有耗时操作在 goroutine 中执行，使用 QueueUpdateDraw 更新 UI
-4. **快捷键冲突** -- 新键 d/R/m/c/x/p 必须在 overlay 可见时被拦截。预防：在 handleGlobalKeys 中添加守卫条件，检查所有 overlay 可见性
-5. **剪贴板路径在导航后失效** -- 如果只存文件名，导航后路径会错误。预防：存储完整绝对路径，导航时不清除剪贴板
+1. **本地路径历史模型与 RecentDirs 不一致** — `RecentDirs` 按服务器维度持久化（`user@host`），本地路径是全局的。必须创建独立的 `PathHistory` 数据层，不复用 `RecentDirs` 的 serverKey 逻辑。
+2. **Dup 的 `d` 键冲突** — `d` 已绑定到 `handleServerDelete()`。Dup 必须使用 `D`（Shift+d）或 `y`。推荐 `y`（vim yank 语义）或 `D`（与 `s`/`S` 排序模式一致）。
+3. **双远端传输不能复用 FileBrowser** — FileBrowser 硬编码为 LocalPane + RemotePane 模式，且持有单个 SFTPService。双远端需要两个 RemotePane 和两个独立连接，必须创建新组件 `DualRemoteFileBrowser`。
+4. **本地临时文件磁盘空间耗尽** — 大文件双远端传输需要本地磁盘空间 >= 文件大小。需要在传输前检查可用空间，失败时 `defer os.RemoveAll()` 清理临时文件。
+5. **SSH 密码认证阻塞 goroutine** — 密码认证的服务器在 `cmd.Start()` 后等待输入，导致 SFTP 连接永远挂起。需要设置连接超时（10s）和 `cmd.Process.Kill()` 进程清理。
 
 ## Implications for Roadmap
 
-基于四个研究维度的综合分析，建议将 v1.2 分为 3 个 phase，按依赖关系和技术风险递进排列。
+Based on research, suggested phase structure:
 
-### Phase 1: Port 接口扩展 + 删除/重命名/新建目录
+### Phase 1: Dup SSH Connection
+**Rationale:** 最低复杂度（~50 行，单文件修改），零架构风险，快速交付建立信心。所有依赖都存在于现有 `ServerService.AddServer()` 中。
+**Delivers:** 服务器列表中 `D` 键一键复制配置，alias 自动去重后缀，清除非配置类 metadata（PinnedAt、SSHCount），复制后可 `e` 编辑。
+**Addresses:** Dup SSH Connection (FEATURES.md)
+**Avoids:** P2 (`d` 键冲突 -- 使用 `D`)，P6 (metadata 继承 -- 清除 PinnedAt/SSHCount/LastSeen)，P9 (alias 冲突 -- 递增后缀)
 
-**Rationale:** 这是所有后续功能的基础。Port 接口扩展后才能实现任何文件操作；删除功能建立确认对话框模式（ConfirmDialog），重命名和新建目录建立文本输入模式（InputDialog），这两个 overlay 组件是后续复制/移动功能的构建块。三者技术复杂度低，可以一起交付。
+### Phase 2: Local Path History Persistence
+**Rationale:** 扩展现有 `RecentDirs` 模式，新增 Port + Adapter + UI overlay，架构变更明确可控。按 ARCHITECTURE.md 估算约 300 行新代码 + 20 行修改。
+**Delivers:** 本地面板 `r` 键弹出路径历史，JSON 持久化（`~/.lazyssh/local-path-history.json`），上传/下载成功后自动记录，最多 20 条 MRU。
+**Addresses:** Persistent Local Path History (FEATURES.md)
+**Avoids:** P1 (模型不一致 -- 独立 PathHistory 数据层)，P8 (路径规范化 -- `filepath.Clean()`)，P12 (已删除路径 -- 显示警告但不移除)
+**Uses:** STACK.md 中的 JSON 持久化模式
 
-**Delivers:** 可用的删除、重命名、新建目录功能（本地+远程）
-
-**Addresses:** FEATURES.md 中的 Delete、Rename、Mkdir 三个 table stakes 功能
-
-**Avoids:** PITFALLS P2（Remove 不能删非空目录 -- 通过 RemoveAll 解决）、P3（TOCTOU -- 通过删除前 Stat 验证解决）、P10（快捷键冲突 -- 通过 overlay 互斥检查解决）、P12（目录名验证 -- 通过输入框验证解决）
-
-**包含的工作：**
-- FileService 接口添加 Remove、RemoveAll、Rename、Mkdir、Stat
-- SFTPClient 添加 RemoveAll、Rename、Mkdir 方法
-- LocalFS 添加 Remove、RemoveAll、Rename、Mkdir、Stat 方法
-- ConfirmDialog overlay 组件
-- InputDialog overlay 组件
-- d/R/m 快捷键路由 + 处理逻辑
-- pkg/sftp 从 indirect 改为 direct 依赖
-
-### Phase 2: 复制功能（CopyService + 剪贴板 + 同面板/跨面板复制）
-
-**Rationale:** 复制功能依赖 Phase 1 建立的 overlay 模式作为参考和 port 接口。复制是独立于删除/重命名的新功能维度，引入了剪贴板状态管理这个新的架构概念。同面板复制需要新的 CopyService 接口和两个实现；跨面板复制复用 TransferService。
-
-**Delivers:** c 标记 + p 粘贴的完整复制功能（同面板 + 跨面板）
-
-**Addresses:** FEATURES.md 中的 Copy 功能
-
-**Avoids:** PITFALLS P1（SFTP 无 copy -- 通过 download+upload 解决）、P5（递归操作阻塞 UI -- 通过 goroutine+QueueUpdateDraw 解决）、P6（剪贴板路径失效 -- 通过完整路径存储解决）、P8（符号链接循环 -- 通过 IsSymlink 检查解决）
-
-**包含的工作：**
-- CopyService 接口定义
-- copyWithProgress 提取为共享工具函数
-- LocalCopyService 和 RemoteCopyService 实现
-- Clipboard 状态结构体
-- c/p 快捷键路由 + 处理逻辑
-- 跨面板复制复用 TransferService 的进度显示
-
-### Phase 3: 移动功能 + 集成完善
-
-**Rationale:** 移动本质上 = 复制 + 删除源文件，强依赖 Phase 2 的复制实现和 Phase 1 的删除实现。移动引入了非原子性风险（copy 成功但 delete 失败），需要额外的错误恢复逻辑。放在最后是因为它组合了前面两个 phase 的所有基础设施。
-
-**Delivers:** x 标记 + p 粘贴的完整移动功能（同面板 + 跨面板）
-
-**Addresses:** FEATURES.md 中的 Move 功能
-
-**Avoids:** PITFALLS P4（Rename 跨文件系统 -- 通过 PosixRename + fallback 解决）、P7（连接断开 -- 通过部分完成状态报告解决）、P11（移动非原子性 -- 通过 copy 成功后再 delete + 失败时提示用户解决）
-
-**包含的工作：**
-- 移动 = 复制 + 删除源文件的组合逻辑
-- PosixRename 优先 + copy+delete fallback
-- 移动失败时的错误恢复和用户提示
-- DI 链更新（CopyService 注入到 FileBrowser）
+### Phase 3: Dual-Remote File Browser
+**Rationale:** 最大架构复杂度，需要新 Port (`RelayTransferService`)、新 Adapter (`relay_transfer_service.go`)、新根组件 (`DualRemoteFileBrowser`)、新 overlay (`ServerPickerOverlay`)。放在最后是因为实现者能从 Phase 1/2 中积累 overlay 和 handler 模式经验。
+**Delivers:** 服务器列表 `M` 键进入双远端模式，两步选择服务器对，双 RemotePane 文件浏览器，`RelayTransferService` 两阶段传输（download-to-temp + re-upload），分阶段进度显示（Phase 1/2, Phase 2/2），取消支持，临时文件自动清理。
+**Addresses:** Dual-Remote File Transfer (FEATURES.md)
+**Avoids:** P3 (单连接限制 -- 独立 DualRemoteFileBrowser)，P4 (磁盘空间 -- 传输前检查)，P5 (密码阻塞 -- 连接超时)，P7 (进度重置困惑 -- Phase 1/2 标签)，P10 (入口 UX -- 两步选择模式)，P11 (并发问题 -- 独立 SFTPClient 实例)
+**Implements:** RelayTransferService 架构组件
 
 ### Phase Ordering Rationale
 
-- **Phase 1 先行** -- Port 接口扩展是所有操作的编译时前提；ConfirmDialog/InputDialog 是 Phase 2 剪贴板 UI 模式的参考实现
-- **Phase 2 在中间** -- 复制引入了全新的架构概念（剪贴板、CopyService），独立于删除/重命名，但被移动依赖
-- **Phase 3 最后** -- 移动是组合操作，依赖前两个 phase 的所有基础设施，且涉及最多的错误恢复逻辑
-
-这种排列确保每个 phase 都有明确的交付价值（用户可以在 Phase 1 后就使用删除/重命名/新建目录），且技术复杂度递进。
+- **Dup 先行** — 最简单，零依赖，快速建立 v1.3 交付节奏。handler 代码可被双远端 phase 参考模式。
+- **本地路径居中** — 扩展现有模式（RecentDirs），有明确的 Port + Adapter + UI 三层参考实现。为 DualRemoteFileBrowser 的 overlay 模式积累经验。
+- **双远端最后** — 架构最复杂（新 service + 新组件 + 修改 TransferModal），放在最后能确保前两个 phase 的代码变更已稳定，减少集成冲突风险。
+- **所有三个功能完全独立** — 没有代码依赖关系，可以并行开发。排序仅基于复杂度递增和信心积累。
 
 ### Research Flags
 
-需要研究的 phase：
-- **Phase 2:** CopyService 的远程复制（download+reupload）性能优化和临时文件管理策略需要验证，特别是大文件场景下的磁盘空间和清理逻辑
-- **Phase 3:** 移动操作的非原子性错误恢复流程需要仔细设计 -- copy 成功但 delete 源失败时的用户体验
+Phases likely needing deeper research during planning:
+- **Phase 3 (Dual-Remote):** `RelayTransferService` 的目录传输编排逻辑需要详细设计——`WalkDir` 获取文件列表后如何分阶段传输和追踪失败文件。`TransferModal.modeRelay` 的 Draw 逻辑需要 UI 原型验证。`ServerPickerOverlay` 的交互流程需要设计评审。
+- **Phase 2 (Local Path History):** 本地路径最大条目数（20 vs 10）的权衡需要在实现时验证。`LocalRecentDirs` 是否需要 `currentPath` 高亮功能（本地面板的当前路径始终已知，可能不需要）。
 
-有标准模式、无需额外研究的 phase：
-- **Phase 1:** Port 接口扩展和 adapter 实现是机械性的薄封装；overlay 组件遵循已建立的 TransferModal/RecentDirs 模式；所有 SFTP 原语在 pkg/sftp 源码中已验证存在
-- **Phase 2（部分）:** 同面板本地复制使用标准 io.Copy + filepath.WalkDir 模式；跨面板复制完全复用 TransferService
+Phases with standard patterns (skip research-phase):
+- **Phase 1 (Dup SSH):** 完全复用现有 `AddServer` + `validateServer` + InputDialog 模式，无新架构。handler 逻辑约 50 行，模式明确。
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | 所有技术原语在 pkg/sftp 源码和 Go 标准库中直接验证，零推断 |
-| Features | HIGH | 基于 mc/ranger/vifm/lf 四个成熟竞品的功能矩阵交叉验证，加上 Nielsen Norman Group 的 UX 最佳实践 |
-| Architecture | HIGH | 基于项目全部 file_browser 包源码的直接分析，所有接口变更和组件设计都有现有代码支撑 |
-| Pitfalls | HIGH | 基于项目代码审查、pkg/sftp 库文档、SFTP 协议规范和 OWASP 安全指南的交叉验证 |
+| Stack | HIGH | 基于项目源码直接分析，所有技术原语已确认存在于当前代码库中，零新外部依赖 |
+| Features | MEDIUM-HIGH | 双远端传输参考了 mc/lf/yazi/Termius 等竞品和 SCP 手册；`scp -3` 无进度条限制已确认；Dup 和本地路径基于明确的用户需求和竞品验证 |
+| Architecture | HIGH | 基于直接代码分析（ports、adapters、file_browser、transfer_service），所有文件路径和方法签名已确认；新组件设计有明确的现有模式参考 |
+| Pitfalls | HIGH | 基于现有代码深度审查 + v1.0-v1.2 实际踩坑经验；13 个 pitfall 的预防策略已明确到代码层面 |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **远程复制性能:** download+reupload 对大文件/大目录的性能影响需要在实现后进行实际测试。临时文件的磁盘空间管理（特别是远程目录大于本地剩余空间时）需要在 Phase 2 规划时考虑
-- **符号链接处理策略:** 当前研究建议递归操作时跳过符号链接，但未做用户调研确认这是否符合预期行为。v1.2 采用"跳过"策略是安全的保守选择，后续可根据用户反馈调整
-- **InputDialog 的 tview.InputField 焦点管理:** 研究提出了通过 `InputHandler(event, func(tview.Primitive) {})` 绕过 tview 焦点系统的方案，但这一方案需要在实现时验证 Enter/Esc 是否正确触发 doneFunc
+- **RelayTransferService 目录传输的具体实现路径**：`WalkDir` 在远程服务器上的 API 调用方式、文件列表缓存策略、失败文件的汇总报告格式——需要在 Phase 3 规划时详细设计。
+- **`ServerPickerOverlay` 是否复用现有 ServerList 组件**：架构研究中建议新建 overlay，但 `server_list.go` 本身是 `tview.Table` 的封装。是否抽取公共表格渲染逻辑以避免代码重复，需要在 Phase 3 规划时决定。
+- **TransferModal.modeRelay 的进度条重置交互**：阶段切换时进度条从 0 重新开始，用户可能困惑。是否需要额外的 "Phase complete" 过渡动画，需要在 UI 原型中验证。
+- **Dup 的 Tags 处理**：STACK.md 建议"保留 Tags"，但 ARCHITECTURE.md 建议"清空 Tags"。两种方案都合理，需要在 Phase 1 实现时做出最终决策。
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `internal/core/ports/file_service.go` -- FileService + SFTPService 接口定义
-- `internal/adapters/data/sftp_client/sftp_client.go` -- SFTPClient 实现
-- `internal/adapters/data/local_fs/local_fs.go` -- LocalFS 实现
-- `internal/adapters/data/transfer/transfer_service.go` -- copyWithProgress 模式
-- `internal/adapters/ui/file_browser/` -- 全部 UI 组件源码
-- `pkg/sftp v1.13.10` client.go -- Remove, RemoveAll, Rename, PosixRename, Mkdir 源码验证
-- Midnight Commander / ranger / vifm / lf -- 功能矩阵和键绑定交叉验证
-- Nielsen Norman Group -- 确认对话框 UX 指南
+- 项目源码直接分析 — `internal/core/ports/`, `internal/core/domain/`, `internal/adapters/data/`, `internal/adapters/ui/file_browser/`, `cmd/main.go`
+- `scp -3` 手册验证 — 确认 relay 模式无进度条输出
+- 现有 CopyRemoteFile/CopyRemoteDir 模式 — 确认两阶段传输已验证可用
+- v1.0-v1.2 实际踩坑经验 — overlay 绘制链、goroutine + QueueUpdateDraw、快捷键冲突
 
 ### Secondary (MEDIUM confidence)
-- SFTP 协议规范 (RFC 4254 + drafts) -- SFTP 无 copy 操作
-- OpenSSH PROTOCOL file -- copy-data 扩展（非标准，pkg/sftp 不支持）
-- UX StackExchange -- Confirm vs Undo 辩论
-- OWASP Unicode Encoding / Path Traversal -- 编码安全和路径遍历防护
+- Midnight Commander — 双远端面板 via VFS/SFTP link（需要 in-app SSH library，与 lazyssh 约束冲突）
+- lf 文档 — 路径历史持久化模式（`~/.local/share/lf/history`），已知并发写入 bug（Issue #1450）
+- Termius — 双 SFTP 面板和服务器复制功能的 UX 参考
+- yazi — Session-based path history + 社区书签插件（yamb.yazi）
 
 ### Tertiary (LOW confidence)
-- lf file manager documentation -- 终端文件管理器剪贴板模式参考（lf 使用 trash-cli，与 lazyssh 的永久删除策略不同）
-- rclone forum -- SFTP 远程复制限制的社区讨论
+- `scp -3` 无进度条的具体限制 — 基于 StackOverflow 讨论和实践经验，未找到 OpenSSH 官方文档明确说明
+- 流式中转（pipe download to upload）的可行性 — 理论上可行但复杂度高，未实际验证
 
 ---
 *Research completed: 2026-04-15*

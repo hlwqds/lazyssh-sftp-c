@@ -1,461 +1,606 @@
-# Feature Research: File Operations (v1.2)
+# Feature Research: Enhanced File Browser (v1.3)
 
 **Analysis Date:** 2026-04-15
-**Domain:** TUI File Management Operations — Delete, Rename, Mkdir, Copy, Move
-**Confidence:** HIGH (cross-referenced across mc, ranger, vifm, lf + existing codebase analysis)
+**Domain:** TUI SSH File Manager Enhancements — Persistent local path history, Server duplication, Dual-remote file transfer
+**Confidence:** MEDIUM (cross-referenced across mc, lf, yazi, Termius, scp manual + existing codebase analysis; dual-remote transfer patterns are niche, less documented)
 **Mode:** Ecosystem
 
 ## Research Sources
 
-- **Midnight Commander (mc)** — F5/F6/F7/F8/Shift+F6 keybindings, recursive delete confirmation dialog (canonical dual-pane TUI)
-- **ranger** — yy/dd/pp mark-put model, `d` opens destructive actions submenu, `cw` vim-style rename
-- **vifm** — yy/dd/p vim-compatible mark-put, `cw` inline rename, `:mkdir` command mode
-- **lf** — y/d/p mark-put, `r` inline rename, trash-cli integration for safe delete
-- **nnn** — per-file delete confirmation (anti-pattern: alert fatigue), 0 to select all
-- **Nielsen Norman Group** — confirmation dialog UX guidelines (use sparingly, for irreversible actions)
-- **UX StackExchange** — "Confirm or Undo" debate (undo preferred for recoverable, confirm for irreversible)
-- **lazyssh existing codebase** — TransferModal multi-mode state machine, RecentDirs overlay pattern, FileService/SFTPService ports, Clipboard concept not yet implemented
+- **Midnight Commander (mc)** — Dual remote panels via SFTP/Shell link VFS, F5 copy between remotes (canonical dual-pane server-to-server transfer)
+- **lf** — Persistent history via `~/.local/share/lf/history` (known concurrency overwrite bug), `~/.local/share/lf/dirs` for directory stack
+- **yazi** — Session-based path history via `j` key; persistent bookmarks via community plugins (yamb.yazi, bookmarks.yazi using DDS state)
+- **ranger** — Directory history is in-memory only, persistent history is open feature request (Issue #1741)
+- **Termius** — Dual SFTP panels side by side (closest commercial equivalent to dual-remote feature)
+- **SCP manual** — `scp -3` flag for local relay transfer; known limitation: no progress bar output in relay mode
+- **SFTP protocol** — No native server-to-server support; proxy requires download+reupload or SSH agent forwarding
+- **lazyssh existing codebase** — RecentDirs (remote MRU with disk persistence), TransferService (download+reupload for CopyRemoteFile), SFTPService, FileService ports, ServerService.AddServer
 
 ---
 
-## Part 1: File Operations Feature Landscape (v1.2)
+## Part 1: Feature 1 — Persistent Local Path History
 
-### Table Stakes (Users Expect These)
+### Background: How Terminal File Managers Handle Path History
 
-Missing any of these makes the file browser feel incomplete. Users coming from mc/ranger/vifm expect these as bare minimum.
+| Manager | Persistence | Storage | Scope | Key |
+|---------|-------------|---------|-------|-----|
+| **lf** | Yes | `~/.local/share/lf/history` | Global (all directories) | `j` |
+| **Midnight Commander** | Yes | `~/.mc/history` | Per-panel directory history | `Alt+Enter` |
+| **ranger** | No (in-memory only) | N/A | Session only | `history_go -1` |
+| **yazi** | Session only (built-in) | N/A | Session | `j`; persistent via plugins |
+| **lazyssh (remote)** | Yes | `~/.lazyssh/recent-dirs/{user@host}.json` | Per-server, 10 entries | `r` |
 
-#### Delete (d key)
+**Key insight:** The existing lazyssh remote directory history (RecentDirs) already implements per-server persistence. The local path history feature is a symmetric extension: record local paths used for upload/download, persisted to `~/.lazyssh/`.
 
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| **Trigger** | `d` key on selected item (cursor or space-selected) | HIGH — mc F8, ranger `dD`, lf `d`, vifm `d` |
-| **Single file** | Delete immediately with confirmation dialog | HIGH |
-| **Directory** | Recursive delete with enhanced confirmation (warn about contents) | HIGH — mc shows recursive delete dialog for non-empty dirs |
-| **Multi-select** | Delete all space-selected items in batch | HIGH — mc, ranger, lf all support bulk delete |
-| **Confirmation** | Single dialog for entire operation (NOT per-file) | HIGH — nnn's per-file prompting is widely criticized as anti-pattern |
-| **Dialog content** | Show: item name, type (file/dir), size, recursive warning for dirs | MEDIUM — UX best practice: communicate scope |
-| **Post-delete** | Refresh listing, move cursor to nearest sibling (not to top) | MEDIUM — mc preserves cursor position; ranger does too |
-| **Local pane** | `os.Remove()` for files, `os.RemoveAll()` for dirs | HIGH — standard Go |
-| **Remote pane** | SFTP `Remove()` for files, need `RemoveDirectory()` for recursive | HIGH — pkg/sftp supports both |
-| **Error handling** | Show error in status bar, partial success for multi-delete | MEDIUM |
+### What Exists in lazyssh Already
 
-**Edge cases for delete:**
-- Deleting the currently open directory (self) — should be blocked
-- Deleting a directory that is the parent of the other pane's cwd — mc allows this
-- Permission denied on some files in recursive delete — report partial failure
-- Symlinks: delete the link itself, not follow it (standard behavior)
-- Read-only files — `os.Remove` handles this; SFTP may need mode change first
-- Very large directories (1000+ files) — async with progress indication
-- Empty selection — status bar message "No files selected"
+The `RecentDirs` component (`recent_dirs.go`) already provides:
+- MRU list with move-to-front deduplication
+- JSON persistence to `~/.lazyssh/recent-dirs/{user@host}.json`
+- `r` key popup with `j`/`k` navigation and Enter selection
+- Overlay rendering on top of FileBrowser
+- `Record()` method called after successful transfer
 
-#### Rename (R key)
+**What's missing for local path history:**
+- No `Record()` call for local paths (currently only `fb.remotePane.GetCurrentPath()` is recorded)
+- No local-path MRU list (only remote MRU exists)
+- No UI for browsing local path history (the `r` key is bound to remote only)
+- Local path history should be **global** (not per-server) since local paths are local to the machine
 
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| **Trigger** | `R` key on current item (single item only, not multi-select) | HIGH — mc Shift+F6, ranger `cw`, vifm `cw`, lf `r` |
-| **UI pattern** | Inline edit: InputField overlay on the file name column | HIGH — all terminal file managers use inline edit |
-| **Pre-fill** | Current filename as default text | HIGH — universal pattern |
-| **Selection** | Select filename without extension (stem only) | MEDIUM — ranger `cw` selects stem; vifm `cw` selects full name. Selecting stem is more useful. |
-| **Confirm** | Enter commits rename, Esc cancels | HIGH |
-| **Empty name** | Block and show error "Filename cannot be empty" | HIGH |
-| **Name collision** | If new name exists in same directory, show overwrite confirmation | HIGH |
-| **Post-rename** | Refresh listing, keep cursor on renamed item | MEDIUM |
-| **Local pane** | `os.Rename()` | HIGH |
-| **Remote pane** | SFTP `Rename()` | HIGH — pkg/sftp has `client.Rename()` |
-| **Extension change** | Allowed — user may want to change file type | HIGH |
+### Table Stakes
 
-**Edge cases for rename:**
-- Rename to existing name (no-op) — silently ignore or show "same name"
-- Rename to name with invalid characters — `/`, `\0` on Unix; `<`, `>`, `:`, etc. on Windows
-- Leading/trailing spaces — trim and warn, or preserve (OS-dependent)
-- Very long filenames — truncate display in InputField but accept full name
-- Rename parent directory — other pane's cwd becomes invalid; mark as stale
-- Concurrent modification (file changed between list and rename) — retry or report error
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Record local upload paths** | After upload (local->remote), the local source directory should be remembered | LOW | One-liner: call `localPaths.Record(fb.localPane.GetCurrentPath())` after upload success |
+| **Record local download paths** | After download (remote->local), the local target directory should be remembered | LOW | Same as upload, call after download success |
+| **Persistent storage** | Local paths should survive app restart | LOW | JSON file at `~/.lazyssh/local-path-history.json`, mirrors RecentDirs pattern |
+| **MRU popup for local paths** | Users expect to quickly jump to previously used local directories | LOW | Reuse RecentDirs overlay component with different data source |
+| **Max 10 entries** | Consistent with remote MRU limit | LOW | Same `maxRecentDirs = 10` cap |
 
-#### Create Directory (m key)
-
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| **Trigger** | `m` key (mkdir) | HIGH — mc F7, vifm `:mkdir` |
-| **UI pattern** | Small centered popup with InputField | HIGH — mc shows input dialog, vifm shows command input |
-| **Pre-fill** | Empty input field with cursor ready | HIGH |
-| **Confirm** | Enter creates directory, Esc cancels | HIGH |
-| **Empty name** | Block and show error | HIGH |
-| **Already exists** | Show error "Directory already exists" | HIGH |
-| **Nested creation** | Support `path/to/dir` — create all intermediate directories | MEDIUM — mc does NOT support nested; ranger does not. lazyssh should support it since `MkdirAll` already exists. |
-| **Post-create** | Refresh listing, scroll to and select the new directory | MEDIUM |
-| **Local pane** | `os.MkdirAll()` | HIGH |
-| **Remote pane** | `sftpService.MkdirAll()` — already exists | HIGH — confirmed in sftp_client.go |
-
-**Edge cases for mkdir:**
-- Permission denied — show error in status bar
-- Invalid characters in path — OS-dependent validation
-- Creating in read-only filesystem — error handling
-- Path traversal attempts (`../../etc`) — allow if user has permissions (admin tool, not sandbox)
-
-#### Copy (c mark + p paste)
-
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| **Mark trigger** | `c` key marks current item (or selected items) for copy | HIGH — ranger `yy`, vifm `yy`, lf `y` |
-| **Mark indicator** | Status bar shows "N file(s) marked for copy" | MEDIUM — ranger shows status line, lf shows copy count |
-| **Paste trigger** | `p` key pastes (copies) marked files to current pane's directory | HIGH — ranger `pp`, vifm `p`, lf `p` |
-| **Same-directory paste** | Create copy with `.1` suffix (e.g., `file.1.txt`) | MEDIUM — follows existing `nextAvailableName()` pattern |
-| **Cross-pane paste** | Copy from local to remote or remote to local (transfer) | HIGH — this is the key value of dual-pane copy |
-| **Multi-file** | All marked files copied in batch | HIGH |
-| **Directory copy** | Recursive copy of entire directory tree | HIGH |
-| **Progress** | Reuse TransferModal for cross-pane (transfer); simple status for same-pane | MEDIUM |
-| **Post-paste** | Clear marks, refresh target pane | HIGH |
-| **Local-local** | `os.Copy` or `io.Copy` loop for same-pane | HIGH |
-| **Remote-remote** | SFTP server-side copy (if supported) or download+reupload | LOW — SFTP protocol doesn't have server-side copy; need download+reupload |
-
-**Edge cases for copy:**
-- Mark files, navigate, then mark more files in different directory — should replace previous mark (standard behavior) or extend (ranger extends with `ya`)
-- Paste into a directory that doesn't exist yet — create it automatically (MkdirAll)
-- Large file copy on same filesystem — could use hard links for speed, but out of scope
-- Copy symlink — copy the link target (follow symlink), not the link itself
-- Permission errors during recursive copy — report partial failure
-- Disk full during copy — stop and report, clean up partial files
-
-#### Move (x mark + p paste)
-
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| **Mark trigger** | `x` key marks current item (or selected items) for move/cut | HIGH — ranger `dd`, vifm `dd`, lf `d` (cut) |
-| **Paste trigger** | `p` key pastes (moves) marked files to current pane's directory | HIGH — ranger `pp` (context-dependent: copy or move), vifm `p`, lf `p` |
-| **Same-directory paste** | This is effectively a rename — show rename UI instead | MEDIUM — ranger treats same-dir move as rename |
-| **Cross-pane move** | Move = copy + delete source | HIGH — this is the dual-pane value |
-| **Multi-file** | All marked files moved in batch | HIGH |
-| **Directory move** | Recursive move of entire directory tree | HIGH |
-| **Confirmation** | For cross-pane move, confirm before deleting source | MEDIUM — destructive operation |
-| **Post-paste** | Clear marks, refresh both source and target panes | HIGH |
-| **Source cleanup** | After successful cross-pane copy, delete source files | HIGH |
-| **Error recovery** | If delete fails after copy, leave source files and report error | HIGH |
-
-**Edge cases for move:**
-- Move to same location — no-op (or rename if name changed)
-- Move parent directory into itself — block (infinite loop)
-- Move directory into its own subdirectory — block
-- Partial failure in multi-file move — some files copied but not all deleted from source — report discrepancy
-- Cross-filesystem move (local-local) — requires copy+delete, not atomic rename
-- Network interruption during remote move — partial state, need cleanup
-
----
-
-### Differentiators (What Sets lazyssh Apart)
+### Differentiators
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Unified c/x/p model for cross-pane operations** | In mc/ranger, copy and transfer are separate actions (F5 for transfer). In lazyssh, `c` mark + `p` paste on the other pane = transfer. This unifies local copy and cross-pane transfer under one mental model. | MEDIUM | Clipboard struct tracks source pane; paste detects cross-pane vs same-pane. |
-| **Cross-pane move (copy + delete)** | Most dual-pane managers treat F6 (move) as transfer + delete. lazyssh's `x` + `p` achieves the same but with the same mark-put consistency. | MEDIUM | Reuses existing TransferService for the copy phase, then DeleteService for cleanup. |
-| **Status bar mark indicator** | After pressing `c` or `x`, status bar shows "3 file(s) marked for copy" or "2 file(s) marked for move". This gives immediate feedback without a separate panel. | LOW | Simple text update in statusBar. |
-| **Recursive delete with scope display** | Confirmation dialog shows item count and total size for directory deletes, not just "Delete directory?" | LOW | Reuse WalkDir for counting. |
+| **Global local path history** | Unlike remote paths (per-server), local paths are shared across all servers — one history covers all transfers regardless of which server you're connected to | LOW | Single `~/.lazyssh/local-path-history.json` file |
+| **Symmetric UX with remote MRU** | Same `r` key behavior on local pane as on remote pane — users don't need to remember different keys per pane | LOW | Bind `r` on local pane (pane 0) to show local path history popup |
 
-### Anti-Features (Explicitly NOT Build)
+### Anti-Features
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| **Trash/recycle bin integration** | 1. `trash-cli` not available on all systems (zero dependency constraint)<br>2. Remote SFTP has no trash concept<br>3. Different trash APIs per platform (gio, trash-cli, macOS Trash) | Permanent delete with confirmation. User can use system file manager for recoverable delete. |
-| **Undo (u key)** | 1. Implementing undo for file operations requires operation logging and reverse execution<br>2. SFTP has no transaction support — undo after network failure is unreliable<br>3. Significant complexity for v1.2 | Confirmation dialog before destructive operations. This is the "confirm" side of the confirm-vs-undo debate. |
-| **Bulk rename (visual mode)** | 1. Ranger's `:bulkrename` launches external `$EDITOR` — lazyssh doesn't have an editor<br>2. Pattern-based rename (regex, numbering) is complex<br>3. Out of scope for v1.2 | Single-item rename with inline edit. Bulk rename can be v2+ with pattern syntax. |
-| **File permissions editing** | 1. Different permission models across platforms (Unix vs Windows)<br>2. SFTP chmod may not be available on all servers<br>3. Display-only permissions already shown | Read-only permission display (already exists). chmod as future feature. |
-| **Copy/move progress for same-filesystem operations** | Same-filesystem copy/move are fast (rename is atomic). Progress UI adds complexity without value. | Status bar message "Copying..." or "Moving..." with completion notification. |
-| **Drag-and-drop between panes** | TUI is keyboard-driven. Mouse support exists in tview but adds complexity for drag gestures. | Mark (c/x) + navigate + paste (p) model. |
-
----
+| **Named bookmarks for local paths** | Adds complexity (name management, collision handling, search) for minimal value over MRU. MRU automatically surfaces the paths you actually use most. | MRU-only list. Named bookmarks deferred to v2+. |
+| **Per-server local path history** | Local paths have nothing to do with which remote server you're connected to. A path used for server A's uploads is equally relevant for server B. | Single global local history file. |
+| **Path frecency (frequency+recency) scoring** | Over-engineering for a list of 10 items. MRU is simpler and works well enough — you always want the most recently used, not the most frequently used. | Simple move-to-front MRU. |
 
 ### Feature Dependencies
 
 ```
-[Delete (d)]
-    └──requires──> [ConfirmationDialog UI component]
-                      └──new──> overlay component (follows TransferModal pattern)
-    └──requires──> [DeleteService port]
-                      └──new──> ports.FileService extension or new FileOpsService
-    └──requires──> [SFTPClient.RemoveDirectory()]
-                      └──partially exists──> Remove() for files, need recursive RemoveAll()
-
-[Rename (R)]
-    └──requires──> [InputField overlay]
-                      └──new──> tview.InputField as overlay component
-    └──requires──> [SFTPClient.Rename()]
-                      └──exists──> pkg/sftp client.Rename() (not yet wrapped in SFTPClient)
-
-[Mkdir (m)]
-    └──requires──> [InputField overlay]
-                      └──shared──> same component as Rename
-    └──requires──> [SFTPClient.MkdirAll()]
-                      └──exists──> already implemented in sftp_client.go
-
-[Copy (c + p)]
-    └──requires──> [Clipboard state management]
-                      └──new──> struct in FileBrowser with SourcePane, Files, Operation
-    └──requires──> [DeleteService] (for source cleanup in move)
-    └──requires──> [SFTPClient.WalkDir()]
-                      └──exists──> already implemented
-    └──cross-pane──> [TransferService]
-                        └──exists──> reuse UploadFile/UploadDir/DownloadFile/DownloadDir
-
-[Move (x + p)]
-    └──requires──> [Clipboard state management]
-                      └──shared──> same as Copy
-    └──requires──> [Copy implementation]
-                      └──depends──> move = copy + delete source
-    └──requires──> [DeleteService]
-    └──cross-pane──> [TransferService] + [DeleteService]
+[Persistent Local Path History]
+    └──requires──> [LocalPathHistory data structure]
+                      └──new──> mirrors RecentDirs but for local paths (no serverKey)
+                      └──reuse──> JSON persistence pattern from RecentDirs.loadFromDisk/saveToDisk
+    └──requires──> [UI popup for local paths]
+                      └──reuse──> RecentDirs overlay component (Draw/HandleKey/Show/Hide)
+                      └──or──> new LocalPathHistory component using same pattern
+    └──requires──> [Record calls in transfer success paths]
+                      └──modify──> initiateTransfer: after successful upload, record local path
+                      └──modify──> initiateTransfer: after successful download, record local path
+                      └──modify──> initiateDirTransfer: same pattern for directory transfers
+    └──requires──> [Key binding for local pane]
+                      └──modify──> handleGlobalKeys: bind 'r' when activePane == 0
 ```
 
 ### Dependency Notes
 
-1. **InputField overlay is shared between Rename and Mkdir.** Both need a text input popup. Build once, use for both. The InputField overlay should support: pre-filled text, placeholder text, label, and a confirm/cancel callback pattern.
+1. **LocalPathHistory can reuse the RecentDirs component directly.** RecentDirs already has all the needed behavior (MRU, persistence, popup). The only difference is: (a) no `serverKey`, (b) different file path (`~/.lazyssh/local-path-history.json`), (c) no `currentPath` highlighting needed (local path is always known).
 
-2. **ConfirmationDialog is shared between Delete and Move confirmation.** Both need a yes/no dialog. The existing TransferModal's cancel-confirm mode (modeCancelConfirm) demonstrates this pattern exactly. Build a reusable ConfirmDialog component.
+2. **Alternatively, refactor RecentDirs into a generic PathHistory component** with serverKey as optional. This is cleaner but more refactoring. For v1.3, creating a separate `LocalPathHistory` struct that mirrors `RecentDirs` is faster and lower risk.
 
-3. **Clipboard state must live in FileBrowser**, not in individual panes. Copy/move are inherently cross-pane operations. The FileBrowser is the only component that knows about both panes and can coordinate mark-put operations.
+3. **The `r` key currently only works on remote pane** (`activePane == 1`). Extending to local pane (`activePane == 0`) requires adding a branch in `handleGlobalKeys` in `file_browser_handlers.go`.
 
-4. **SFTPClient already has `Remove()` and `MkdirAll()` and `WalkDir()`.** What's missing is `Rename()` (pkg/sftp supports it but it's not wrapped) and `RemoveAll()` (recursive directory removal). These are thin wrappers.
+### Recommended Key Binding
 
-5. **Cross-pane copy/move reuses existing TransferService.** When pasting to the other pane, the copy phase is just an upload or download. This means we get progress tracking, conflict handling, and cancellation for free.
+| Key | Context | Action |
+|-----|---------|--------|
+| `r` | Local pane (activePane == 0) | Show local path history popup |
+| `r` | Remote pane (activePane == 1) | Show remote directory history popup (existing) |
 
-6. **Same-pane copy needs new local copy logic.** `os.Rename()` only works on same filesystem. For robustness, implement `copyFile(src, dst)` using `io.Copy` with buffered reads, plus `copyDir(src, dst)` for recursive directory copy.
+**Conflict analysis:** `r` is already consumed on remote pane. Adding it for local pane is a natural extension — the user sees the same behavior on both sides.
+
+### Implementation Sketch
+
+```go
+// local_path_history.go — mirrors recent_dirs.go
+type LocalPathHistory struct {
+    *tview.Box
+    paths         []string
+    visible       bool
+    selectedIndex int
+    onSelect      func(path string)
+    log           *zap.SugaredLogger
+    filePath      string // ~/.lazyssh/local-path-history.json
+}
+
+func NewLocalPathHistory(log *zap.SugaredLogger) *LocalPathHistory { ... }
+func (lph *LocalPathHistory) Record(path string) { ... } // identical to RecentDirs.Record
+func (lph *LocalPathHistory) Draw(screen tcell.Screen) { ... } // identical to RecentDirs.Draw
+func (lph *LocalPathHistory) HandleKey(event *tcell.EventKey) *tcell.EventKey { ... }
+```
+
+Recording in `initiateTransfer()`:
+```go
+// After successful upload
+fb.localPathHistory.Record(fb.localPane.GetCurrentPath())
+fb.recentDirs.Record(fb.remotePane.GetCurrentPath()) // existing
+
+// After successful download
+fb.localPathHistory.Record(fb.localPane.GetCurrentPath())
+fb.recentDirs.Record(fb.remotePane.GetCurrentPath()) // existing
+```
 
 ---
 
-### MVP Definition (v1.2)
+## Part 2: Feature 2 — Duplicate SSH Connection (Dup)
 
-#### Launch With (P1)
+### Background: How SSH Managers Handle Entry Duplication
 
-- [ ] **Delete single file** — `d` key, confirmation dialog, local + remote
-- [ ] **Delete directory (recursive)** — `d` key, enhanced confirmation showing scope, local + remote
-- [ ] **Delete multi-selected files** — space-select + `d`, batch confirmation
-- [ ] **Rename file/directory** — `R` key, inline InputField overlay, local + remote
-- [ ] **Create directory** — `m` key, InputField popup, local + remote (nested path support)
-- [ ] **Copy mark** — `c` key marks file(s), status bar indicator
-- [ ] **Copy paste (same pane)** — `p` copies marked files to current directory
-- [ ] **Copy paste (cross-pane)** — `p` transfers marked files to other pane (reuses TransferService)
-- [ ] **Move mark** — `x` key marks file(s), status bar indicator
-- [ ] **Move paste (same pane)** — `p` renames (same as move within dir)
-- [ ] **Move paste (cross-pane)** — `p` transfers + deletes source
+Duplication (cloning a server entry to create a new one with a different name) is a common pattern in configuration management tools. In the SSH config context, it's valuable when:
 
-#### Add After Validation (v1.x)
+- Creating a new server that's similar to an existing one (same user, port, identity file, proxy settings)
+- Testing a modified config without losing the original
+- Creating multiple aliases for the same server with different options (e.g., different ports, different proxy jumps)
 
-- [ ] **Mark indicator in file listing** — visual marker (e.g., `C` or `M` prefix) on marked files
-- [ ] **Mark all files** — `0` or `Ctrl+A` to select all files in current directory
-- [ ] **Copy progress for large same-pane operations** — progress bar for large directory copies
-- [ ] **Conflict resolution for same-pane copy** — overwrite/skip/rename dialog (reuse TransferModal pattern)
-- [ ] **Keyboard shortcut help** — `?` key shows all keybindings including new ones
+**Tools that support this:**
+- **Termius** — Right-click > Duplicate on any server entry
+- **MobaXterm** — Clone session feature
+- **SSH config editing** — Manually copy-pasting Host blocks (the baseline behavior users fall back to)
 
-#### Future Consideration (v2+)
+In the terminal SSH manager space, this feature is less common because most tools (lazyssh included) are simple config editors. Adding a `d` key to duplicate is a significant quality-of-life improvement over manual config editing.
 
-- [ ] **Undo last operation** — operation log with reverse execution
-- [ ] **Bulk rename with patterns** — regex, numbering, case conversion
-- [ ] **File permissions editing** — chmod for local and remote
-- [ ] **Symlink creation** — `ln -s` equivalent
-- [ ] **File ownership changes** — chown (local only, limited remote support)
-- [ ] **Search within directory** — filter/narrow file listing by pattern
+### Key Conflict: `d` Key is Already Used
+
+**Critical finding:** In the current `handleGlobalKeys` in `handlers.go`, `d` is bound to `handleServerDelete()` (line 61). This means we **cannot** use `d` for duplicate on the server list.
+
+The PROJECT.md specifies `d` key for duplication, but this conflicts with the existing delete binding. We need an alternative key.
+
+**Available options:**
+- `D` (Shift+D) — different from `d` (delete), easy to remember ("D for Duplicate")
+- `y` — free on server list (currently unused in global keys; `y` in file browser would conflict with future yank)
+- `w` — free, mnemonic "copy/clone"
+- `C` (Shift+C) — mnemonic "Copy/Clone server config"
+
+**Recommendation:** `D` (Shift+D). It's visually related to `d` (delete) but distinct, and the mnemonic "D for Duplicate" is natural. The status bar can show `[white]d[-] Delete  [white]D[-] Duplicate` to make both visible.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Duplicate server config** | Create a new entry with all fields copied from selected server | LOW | `ServerService.AddServer()` already exists; just copy the struct |
+| **Prompt for new alias** | User must specify a unique alias for the duplicated entry | LOW | Reuse InputDialog pattern or use tview.Modal with InputField |
+| **Unique alias validation** | Prevent creating duplicate aliases (SSH config uniqueness) | LOW | `validateServer()` already checks alias format; need alias uniqueness check |
+| **List refresh after dup** | New entry should appear in server list immediately | LOW | Call `refreshServerList()` after successful dup |
+| **Cursor on new entry** | Scroll to and select the newly created entry | LOW | `serverList.SetCurrentItem(index)` |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **One-key duplication** | Most users currently edit SSH config manually or use Add+fill-every-field. Dup reduces setup from 20+ fields to just an alias. | LOW | Single keypress + type alias + Enter |
+| **Preserves all SSH config fields** | Dup copies everything: proxy settings, forwarding rules, authentication config, identity files, etc. Users only need to change what's different. | LOW | `domain.Server` struct is the full config; copy = deep copy |
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| **Multi-field diff editor after dup** | Too complex for v1.3. After dup, user can `e` (edit) to change specific fields. | Dup creates entry, user edits separately if needed |
+| **Bulk duplication** | Selecting multiple servers and duplicating all is an edge case with no clear use pattern | Single server duplication only |
+| **Dup with modifications prompt** | "Which fields do you want to change?" adds significant UI complexity | Create exact copy, then `e` to edit |
+
+### Feature Dependencies
+
+```
+[Dup SSH Connection]
+    └──requires──> [Unique alias validation]
+                      └──exists──> validateServer() checks format, need alias uniqueness
+                      └──extend──> check against existing server aliases via ListServers
+    └──requires──> [InputDialog for alias]
+                      └──reuse──> file_browser.InputDialog or tview.Modal + InputField
+    └──requires──> [ServerService.AddServer()]
+                      └──exists──> already implemented in server_service.go
+    └──requires──> [Deep copy of domain.Server]
+                      └──trivial──> Go struct assignment is value copy; slices need manual copy
+    └──requires──> [Key binding on server list]
+                      └──modify──> handleGlobalKeys in handlers.go, add 'D' case
+```
+
+### Dependency Notes
+
+1. **Deep copy concern:** `domain.Server` contains slices (`Aliases`, `IdentityFiles`, `Tags`, `LocalForward`, `RemoteForward`, `DynamicForward`). Simple `serverCopy := server` will share slice backing arrays. Need manual slice copies or `deepCopyServer()` helper.
+
+2. **Alias uniqueness:** `validateServer()` checks format but not uniqueness. Need to check if alias already exists in `~/.ssh/config` before adding. This can be done by calling `ListServers("")` and checking for name collision.
+
+3. **InputDialog availability:** The `file_browser.InputDialog` is a package-private component. For use in `handlers.go` (different package), we either: (a) extract it to a shared package, (b) create a similar modal directly in handlers.go using `tview.Modal` + `tview.InputField`, or (c) add the dup flow as a method on TUI. Option (b) is simplest and avoids cross-package dependencies.
+
+### Implementation Sketch
+
+```go
+func (t *tui) handleServerDuplicate() {
+    server, ok := t.serverList.GetSelectedServer()
+    if !ok {
+        t.showStatusTempColor("No server selected", "#FF6B6B")
+        return
+    }
+
+    // Create modal with input field for new alias
+    input := tview.NewInputField().SetLabel("New alias: ").SetFieldWidth(30)
+    modal := tview.NewForm().
+        AddFormItem(input).
+        AddButton("Create", func() {
+            newAlias := strings.TrimSpace(input.GetText())
+            if newAlias == "" {
+                t.showStatusTempColor("Alias cannot be empty", "#FF6B6B")
+                return
+            }
+            if newAlias == server.Alias {
+                t.showStatusTempColor("Alias must differ from original", "#FF6B6B")
+                return
+            }
+            // Check uniqueness
+            servers, _ := t.serverService.ListServers("")
+            for _, s := range servers {
+                if s.Alias == newAlias {
+                    t.showStatusTempColor("Alias already exists", "#FF6B6B")
+                    return
+                }
+            }
+            // Deep copy and set new alias
+            dup := deepCopyServer(server)
+            dup.Alias = newAlias
+            dup.PinnedAt = time.Time{}  // clear pinned state
+            dup.SSHCount = 0            // reset connection count
+            if err := t.serverService.AddServer(dup); err != nil {
+                t.showStatusTempColor("Dup failed: "+err.Error(), "#FF6B6B")
+                return
+            }
+            t.refreshServerList()
+            // Scroll to new entry
+            // ...
+            t.returnToMain()
+            t.showStatusTemp("Duplicated: " + newAlias)
+        }).
+        AddButton("Cancel", func() { t.returnToMain() })
+    t.app.SetRoot(modal, true)
+    t.app.SetFocus(input)
+}
+```
 
 ---
 
-### Feature Prioritization Matrix
+## Part 3: Feature 3 — Dual-Remote File Transfer (Local Relay)
+
+### Background: How Dual-Remote Transfer Works
+
+Dual-remote transfer means transferring files between two different remote servers, using the local machine as a relay. This is fundamentally different from the current local<->remote transfer model.
+
+**Why local relay?** SFTP protocol has no native server-to-server transfer capability. The two practical approaches are:
+
+| Approach | Mechanism | Progress Tracking | Complexity |
+|----------|-----------|-------------------|------------|
+| **`scp -3`** | `scp -3 user1@host1:/file user2@host2:/dest` — data flows host1→local→host2 | **No built-in progress bar** in relay mode | LOW (single command) |
+| **Download + Re-upload** | Download from server A to temp, upload temp to server B | Full progress tracking per phase | MEDIUM (two transfers) |
+| **SSH agent forwarding** | `ssh -A -t user1@host1 scp file user2@host2:/dest` — data flows host1→host2 directly | Limited (only remote-side progress) | HIGH (requires agent setup on both servers) |
+| **MC VFS approach** | Opens two SFTP sessions and orchestrates copy between them | Depends on implementation | HIGH (in-app SSH library needed) |
+
+**Critical technical finding: `scp -3` has no progress bar.**
+When using `scp -3` in relay mode, the standard `-v` (verbose) flag does not produce byte-level progress. The `--progress-bar` flag also does not work in relay mode because the data flows through stdin/stdout of the local scp process, not through a direct file descriptor. This is a known limitation of OpenSSH's scp implementation. (Confidence: MEDIUM — based on manual testing experience and community reports; could not find authoritative documentation confirming this explicitly, but multiple StackOverflow threads discuss the lack of progress in `scp -3` mode.)
+
+**Recommendation:** Use the **download + re-upload** approach (two-phase transfer). This is exactly what `CopyRemoteFile`/`CopyRemoteDir` already do for same-server remote-to-remote copies. For cross-server, the pattern is identical — the only difference is using two different SFTPService instances.
+
+### How Midnight Commander Handles This
+
+MC supports dual-remote via its VFS layer:
+1. Left panel connects to server A via `sftp://` or `sh://` (Shell link/FISH)
+2. Right panel connects to server B via `sftp://` or `sh://`
+3. User selects files and presses F5 (Copy) — MC orchestrates the transfer internally
+4. MC uses its VFS abstraction to read from one SFTP session and write to another, buffering in memory or temp files
+
+**MC's approach requires an in-app SSH library** (libssh2 or similar). lazyssh deliberately avoids this per its security constraints ("reuse system scp/sftp commands"). So lazyssh must use the two-phase relay approach.
+
+### Table Stakes
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Select two different servers** | User picks source server and destination server from the server list | MEDIUM | New UI flow: server list selection mode |
+| **Dual-remote file browser** | Left panel = server A, Right panel = server B (both remote) | HIGH | Requires two SFTP connections simultaneously |
+| **File transfer between servers** | Download from A to local temp, upload from temp to B | HIGH | Reuses existing download+upload pattern from CopyRemoteFile/CopyRemoteDir |
+| **Staged progress display** | Phase 1: "Downloading from server A...", Phase 2: "Uploading to server B..." | MEDIUM | TransferModal already supports phase labels (see remote paste dir) |
+| **Cancel support** | User can cancel at any point during either phase | LOW | context.Context cancellation already propagates through TransferService |
+| **Temp file cleanup** | Temp files are deleted after upload completes (or on cancel/error) | LOW | `defer os.RemoveAll(tmpDir)` pattern already used |
+| **Directory transfer** | Recursive directory transfer between servers | HIGH | DownloadDir + UploadDir, same pattern as CopyRemoteDir |
+| **Conflict handling** | Skip/overwrite/rename on the destination server | MEDIUM | Reuse buildConflictHandler pattern |
+
+### Differentiators
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **Keyboard-driven server selection** | Most tools require mouse clicks or complex multi-step flows. lazyssh selects servers from the familiar server list. | MEDIUM | `D` key on server list enters dual-select mode; j/k to pick source, Enter, j/k to pick dest, Enter |
+| **Staged progress with speed/ETA** | Unlike `scp -3` which has no progress, lazyssh shows full progress for both phases | MEDIUM | Already supported by TransferModal; just need phase labels |
+| **No additional security risk** | Still uses system scp/sftp, no in-app SSH library | LOW | Core constraint maintained |
+
+### Anti-Features
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| **Same-server dual-remote transfer** | Copying files within the same server already works (CopyRemoteFile/CopyRemoteDir in v1.2). Dual-remote is specifically for **different** servers. | Use existing remote copy/move (c/x + p on remote pane) for same-server operations |
+| **Parallel download+upload (streaming)** | Would require piping download output directly to upload input without temp storage. This is fragile (what if upload fails mid-stream? partial data on dest). The two-phase approach with temp storage is more robust. | Download fully to temp, then upload. Temp is cleaned up afterward. |
+| **`scp -3` command approach** | No progress bar, no per-file tracking for directories, hard to integrate with existing TransferModal. The two-phase approach gives full control. | Download + re-upload via existing TransferService |
+| **Direct server-to-server via SSH hop** | Requires SSH agent forwarding to be configured on both servers, plus password-less auth between them. Too many prerequisites. | Local relay (works with existing SSH config) |
+| **Resume/checkpoint for interrupted transfers** | Significant complexity; would need to track which files succeeded in each phase | Re-transfer from scratch on retry (consistent with existing v1.x behavior) |
+
+### Feature Dependencies
+
+```
+[Dual-Remote File Transfer]
+    └──requires──> [Two simultaneous SFTP connections]
+                      └──new──> second SFTPService instance for destination server
+                      └──architectural concern──> current TUI has single sftpService
+    └──requires──> [Server selection UI flow]
+                      └──new──> dual-select mode on server list (pick source + dest)
+    └──requires──> [DualRemoteFileBrowser component]
+                      └──new──> variant of FileBrowser with both panes remote
+                      └──or──> extend FileBrowser to accept two SFTPService instances
+    └──requires──> [DownloadDir + UploadDir orchestration]
+                      └──exists──> TransferService.CopyRemoteDir pattern
+                      └──adapt──> use different SFTPService for upload vs download
+    └──requires──> [TransferModal phase labels]
+                      └──exists──> already supports fileLabel override (see handleRemotePaste)
+    └──requires──> [Temp directory management]
+                      └──exists──> os.MkdirTemp + defer os.RemoveAll pattern
+```
+
+### Dependency Notes
+
+1. **Two SFTP connections is the biggest architectural challenge.** Currently, `tui` has a single `sftpService` field and `FileBrowser` receives one `SFTPService`. For dual-remote, we need two independent SFTP connections. This means:
+   - Either create a new `SFTPService` instance at the adapter level for the second server
+   - Or modify `FileBrowser` to optionally accept two SFTP services
+   - The `transferService` currently holds a reference to one `SFTPService` — for dual-remote, it needs to coordinate between two
+
+2. **Server selection UI needs careful design.** The user needs to:
+   - Pick source server from server list
+   - Pick destination server from server list
+   - Both must be different servers
+   - The UI should make the two-step selection obvious
+
+   **Proposed flow:** On the server list, press `D` (if not used for dup) or a new key (e.g., `T` for Transfer) to enter dual-select mode:
+   - Status bar: "Select SOURCE server (Enter to confirm)"
+   - User navigates with j/k, presses Enter
+   - Status bar: "Select DESTINATION server (Enter to confirm)"
+   - User navigates with j/k, presses Enter
+   - File browser opens with source on left, destination on right
+
+   **Key conflict with dup:** Both dup and dual-remote need a key on the server list. See key binding analysis below.
+
+3. **TransferService extension.** The current `CopyRemoteFile`/`CopyRemoteDir` methods use `ts.sftp` for both download and upload. For dual-remote, we need to download from one SFTPService and upload to a different one. Options:
+   - Add new methods `RelayFile(ctx, srcSFTP, dstSFTP, ...)` and `RelayDir(ctx, srcSFTP, dstSFTP, ...)`
+   - Or create a new `DualRemoteTransferService` that takes two SFTP instances
+   - Recommendation: Add methods to existing TransferService that accept explicit SFTP service parameters
+
+### Staged Progress Display Design
+
+The transfer should show clear phase separation:
+
+```
+Phase 1 — Download from server A:
+┌──────────────────────────────────────────┐
+│ Downloading from server-a (user@a.com)   │
+│                                          │
+│ file.txt                                 │
+│ [████████████░░░░░░░░░░░] 45%  2.3 MB/s  │
+│ ETA: 0:12                                 │
+└──────────────────────────────────────────┘
+
+Phase 2 — Upload to server B:
+┌──────────────────────────────────────────┐
+│ Uploading to server-b (user@b.com)       │
+│                                          │
+│ file.txt                                 │
+│ [████████████████░░░░░░] 75%  1.8 MB/s  │
+│ ETA: 0:05                                 │
+└──────────────────────────────────────────┘
+
+Summary:
+┌──────────────────────────────────────────┐
+│ Transfer complete                         │
+│ server-a → server-b                      │
+│ 3 files transferred, 0 failed            │
+│ Total: 15.2 MB in 8.3s (1.83 MB/s)      │
+│                                          │
+│ Press any key to close                   │
+└──────────────────────────────────────────┘
+```
+
+### Key Binding Analysis for Server List
+
+Currently used keys on server list (from `handlers.go`):
+- `q` — quit
+- `/` — search
+- `a` — add server
+- `e` — edit server
+- `d` — **delete server** (CONFLICT with dup if `d` is used)
+- `p` — pin server
+- `s`/`S` — sort
+- `c` — copy SSH command
+- `g` — ping
+- `r` — refresh
+- `t` — tags
+- `f` — port forward
+- `F` — file browser
+- `x` — stop forwarding
+- `j`/`k` — navigate
+- `Enter` — connect
+
+**Available keys for dup and dual-remote:**
+- `D` (Shift+D) — Dup server entry
+- `T` — Transfer (dual-remote)
+- `y` — free
+- `w` — free
+- `b` — free
+
+**Recommendation:**
+- `D` for dup (mnemonic: Duplicate)
+- `T` for dual-remote transfer (mnemonic: Transfer)
+
+---
+
+## Combined Feature Dependencies
+
+```
+[Feature 1: Persistent Local Path History]
+    └──no dependency on Feature 2 or 3
+    └──extends──> existing RecentDirs pattern
+    └──modifies──> initiateTransfer, initiateDirTransfer success paths
+
+[Feature 2: Dup SSH Connection]
+    └──no dependency on Feature 1 or 3
+    └──modifies──> handleGlobalKeys in handlers.go
+    └──uses──> ServerService.AddServer (existing)
+    └──uses──> validateServer (existing, needs uniqueness check)
+
+[Feature 3: Dual-Remote Transfer]
+    └──no dependency on Feature 1 or 2
+    └──requires──> two SFTPService instances (architectural)
+    └──requires──> server selection UI (new)
+    └──extends──> TransferService with relay methods
+    └──extends──> FileBrowser or new DualRemoteFileBrowser
+
+All three features are INDEPENDENT — they can be built in any order.
+```
+
+---
+
+## MVP Definition (v1.3)
+
+### Launch With (P1)
+
+- [ ] **Local path history persistence** — Record upload/download local paths, JSON at `~/.lazyssh/local-path-history.json`, MRU popup with `r` on local pane
+- [ ] **Dup SSH connection** — `D` key on server list, InputField for alias, deep copy of server config, uniqueness validation
+- [ ] **Dual-remote file browser** — Select two servers from list, dual-remote pane layout, file/directory listing on both
+- [ ] **Dual-remote file transfer** — Download from server A to temp, upload to server B, staged progress display
+
+### Add After Validation (v1.x)
+
+- [ ] **Dual-remote file management** — delete/rename/mkdir between two remote servers
+- [ ] **Dual-remote copy/move** — clipboard operations across two remote servers
+- [ ] **Path history for dual-remote** — record remote paths used in dual-remote context
+- [ ] **Dual-remote conflict handling** — overwrite/skip/rename on destination server
+
+### Future Consideration (v2+)
+
+- [ ] **Same-server dual-directory view** — two panes for the same server showing different directories (out of scope per PROJECT.md)
+- [ ] **Persistent bookmarks** — named bookmarks beyond MRU
+- [ ] **Dup with field diff** — show which fields differ between original and dup, allow selective modification before saving
+- [ ] **Streaming relay** — pipe download directly to upload without temp storage (for very large files)
+
+---
+
+## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority | Phase Suggestion |
 |---------|------------|---------------------|----------|------------------|
-| Delete (file + dir) | HIGH | LOW-MEDIUM | P1 | Phase 1 (simplest, establishes confirmation dialog pattern) |
-| Rename | HIGH | LOW | P1 | Phase 2 (establishes InputField overlay pattern) |
-| Mkdir | HIGH | LOW | P1 | Phase 2 (shares InputField with rename) |
-| Copy (mark + paste) | HIGH | MEDIUM | P1 | Phase 3 (requires clipboard state, cross-pane reuses TransferService) |
-| Move (mark + paste) | HIGH | MEDIUM | P1 | Phase 3 (depends on copy + delete infrastructure) |
-| Multi-select delete | MEDIUM | LOW | P1 | Phase 1 (extends single delete) |
-| Cross-pane copy/move | HIGH | MEDIUM | P1 | Phase 3 (depends on clipboard + transfer service) |
-| Mark indicator in listing | MEDIUM | LOW | P2 | Phase 3 or post-v1.2 |
-| Conflict resolution (same-pane) | MEDIUM | MEDIUM | P2 | Post-v1.2 |
-| Bulk rename | MEDIUM | HIGH | P3 | v2+ |
-| Undo | HIGH | HIGH | P3 | v2+ |
-| Permissions editing | LOW | MEDIUM | P3 | v2+ |
+| Local path history persistence | MEDIUM | LOW | P1 | Phase 1 (simplest, extends existing pattern) |
+| Dup SSH connection | MEDIUM | LOW | P1 | Phase 2 (simple, self-contained) |
+| Dual-remote file browser UI | HIGH | HIGH | P1 | Phase 3 (architectural complexity) |
+| Dual-remote file transfer | HIGH | HIGH | P1 | Phase 4 (depends on Phase 3) |
+| Dual-remote file management | MEDIUM | HIGH | P2 | v1.x |
+| Dual-remote copy/move | MEDIUM | HIGH | P2 | v1.x |
+
+**Phase ordering rationale:**
+1. **Local path history first** — lowest risk, extends existing RecentDirs pattern, no architectural changes
+2. **Dup second** — low risk, self-contained in server list, no dependency on file browser
+3. **Dual-remote browser third** — highest architectural impact (two SFTP connections), needs careful design
+4. **Dual-remote transfer fourth** — depends on Phase 3's browser, but transfers reuse existing TransferService patterns
 
 ---
 
-### Competitor Feature Analysis (File Operations)
+## Competitor Feature Analysis
 
-| Feature | Midnight Commander | Ranger | vifm | lf | lazyssh (planned) |
-|---------|-------------------|--------|------|----|-------------------|
-| **Delete** | F8, confirm dialog, recursive | `dD` or `d` submenu | `d`, confirm | `d`, trash-cli | `d`, confirm dialog |
-| **Rename** | Shift+F6 | `cw` (vim-style) | `cw` (vim-style) | `r` (inline) | `R`, inline InputField |
-| **Mkdir** | F7, input dialog | `:mkdir` command | `:mkdir` command | `:mkdir` command | `m`, InputField popup |
-| **Copy** | F5 (dual-pane, no mark) | `yy` + `pp` (mark-put) | `yy` + `p` (mark-put) | `y` + `p` (mark-put) | `c` + `p` (mark-put) |
-| **Move** | F6 (dual-pane, no mark) | `dd` + `pp` (mark-put) | `dd` + `p` (mark-put) | `d` + `P` (mark-put) | `x` + `p` (mark-put) |
-| **Cross-pane** | Implicit (other pane is target) | N/A (single pane) | Dual-pane aware | N/A (single pane) | Explicit mark + paste to other pane |
-| **Undo** | No | Yes (`u`) | Yes (`u`) | Yes (`u`) | No (v1.2) |
-| **Trash** | No (permanent) | No (permanent) | Optional | Yes (trash-cli) | No (permanent + confirm) |
-| **Multi-select** | Insert key | Space/v/V | t/v/V | Space | Space (existing) |
+| Feature | Midnight Commander | Termius | lf | lazyssh (planned) |
+|---------|-------------------|---------|----|-------------------|
+| **Local path history** | Yes (per-panel) | N/A (GUI) | Yes (persistent) | Yes (global MRU, `r` key) |
+| **Remote path history** | Yes (per-panel) | Yes (per-host) | No | Yes (per-server MRU, `r` key) |
+| **Dup server entry** | No (edit config) | Yes (right-click) | N/A | Yes (`D` key) |
+| **Dual-remote panels** | Yes (VFS SFTP link) | Yes (dual SFTP) | No (local only) | Yes (dual SFTP) |
+| **Dual-remote transfer** | Yes (F5 between remotes) | Yes (drag-drop) | N/A | Yes (local relay, staged progress) |
+| **Transfer progress** | Basic | Detailed | N/A | Detailed (bar, speed, ETA, phases) |
+| **Cancel mid-transfer** | Yes (Ctrl+C) | Yes | N/A | Yes (context cancellation) |
 
-**Key insight:** lazyssh follows the **mark-put model** (ranger/vifm/lf) rather than the **dual-pane implicit model** (mc). This is because:
-1. The mark-put model is more flexible — user can navigate anywhere before pasting
-2. It works naturally with the existing Space multi-select
-3. It unifies local copy and cross-pane transfer under one mental model
-4. Status bar feedback ("3 files marked for copy") makes the state visible
-
-**MC's lesson:** MC uses F5/F6 which implicitly target the other pane. This is simpler but less flexible — you can't copy to a subdirectory of the other pane without first navigating there. The mark-put model is strictly more capable.
-
-**ranger/vifm's lesson:** These use vim-style `yy`/`dd` which conflicts with lazyssh's `y` (potential future yank/copy-to-clipboard). lazyssh uses `c` for copy and `x` for move, which is more intuitive for non-vim users and avoids key conflicts.
+**Key insight:** lazyssh's dual-remote transfer via local relay is less efficient than MC's in-app VFS approach or Termius's direct transfer. However, it maintains the "zero new dependencies" constraint and provides better progress feedback than `scp -3`. The tradeoff is speed (data passes through local machine) vs. simplicity and security.
 
 ---
 
-### How Each Operation Works in Practice
+## Architectural Concerns for Dual-Remote
 
-#### Delete Flow
+### Two SFTP Connections
 
-```
-1. User navigates to file/directory
-2. User optionally space-selects multiple items
-3. User presses `d`
-4. Confirmation dialog appears:
-   - Single file: "Delete 'filename.txt' (1.2 MB)? [y] Yes [n] No [Esc] Cancel"
-   - Directory: "Delete 'mydir/' (15 files, 3.4 MB)? [y] Yes [n] No [Esc] Cancel"
-   - Multi-select: "Delete 5 selected items? [y] Yes [n] No [Esc] Cancel"
-5. User presses `y` or Enter to confirm, `n` or Esc to cancel
-6. If confirmed:
-   - Files: os.Remove / SFTP Remove
-   - Directories: os.RemoveAll / SFTP RemoveAll (recursive)
-   - Multi-file: iterate, report partial failures
-7. Refresh listing, show status message
-```
-
-#### Rename Flow
+Currently, the TUI and FileBrowser each hold a single SFTPService reference. For dual-remote:
 
 ```
-1. User navigates to file/directory
-2. User presses `R`
-3. InputField overlay appears on the name column, pre-filled with current name
-4. User edits the name (cursor starts at stem, before extension)
-5. User presses Enter to confirm:
-   - Validate: non-empty, no invalid characters
-   - Check for name collision in same directory
-   - If collision: show overwrite confirmation
-   - Execute: os.Rename / SFTP Rename
-   - Refresh listing, keep cursor on renamed item
-6. User presses Esc to cancel: dismiss overlay, no changes
+Current:
+  TUI.sftpService ──> single SFTP connection
+  FileBrowser.sftpService ──> same connection
+  TransferService.sftp ──> same connection
+
+Dual-remote needed:
+  DualRemoteFileBrowser.srcSFTP ──> SFTP connection to server A
+  DualRemoteFileBrowser.dstSFTP ──> SFTP connection to server B
+  TransferService.RelayFile(srcSFTP, dstSFTP, ...) ──> coordinates between both
 ```
 
-#### Mkdir Flow
+**Options:**
+1. **New DualRemoteFileBrowser component** — separate from FileBrowser, takes two SFTPService instances. Cleaner separation but more code.
+2. **Extend FileBrowser** — add optional `srcSFTP` and `dstSFTP` fields, change pane behavior based on mode. More code reuse but more complex.
+3. **TransferService methods with explicit SFTP parameters** — `RelayFile(ctx, srcSFTP, dstSFTP, ...)` bypasses the struct's single `sftp` field.
 
-```
-1. User presses `m`
-2. InputField popup appears centered: "Create directory: [input field]"
-3. User types directory name (supports nested: "path/to/newdir")
-4. User presses Enter to confirm:
-   - Validate: non-empty, no invalid characters
-   - Check if already exists
-   - Execute: os.MkdirAll / SFTP MkdirAll
-   - Refresh listing, scroll to and select new directory
-5. User presses Esc to cancel: dismiss popup
-```
+**Recommendation:** Option 1 (new component). The dual-remote browser has fundamentally different semantics (both panes are remote, no local pane). A separate component avoids adding mode-switching complexity to the existing FileBrowser.
 
-#### Copy Flow
+### SFTPService Factory
 
-```
-1. User navigates to file/directory
-2. User optionally space-selects multiple items
-3. User presses `c` (copy mark)
-4. Status bar updates: "3 file(s) marked for copy"
-5. User navigates to target directory (same pane, other pane, or subdirectory)
-6. User presses `p` (paste):
-   a. Same pane, same directory → copy with .1 suffix
-   b. Same pane, different directory → copy to target
-   c. Other pane → upload/download (reuses TransferService)
-7. If cross-pane: TransferModal shows progress
-8. Status bar: "Copied 3 file(s)"
-9. Marks cleared, target pane refreshed
+Currently, SFTPService is created once in `cmd/main.go` and injected everywhere. For dual-remote, we need to create SFTPService instances on-demand:
+
+```go
+// New factory function needed
+func NewSFTPService(log *zap.SugaredLogger) ports.SFTPService {
+    return sftp_client.New(log)
+}
 ```
 
-#### Move Flow
+The TUI would create two SFTPService instances when entering dual-remote mode, and close both when exiting.
 
-```
-1. User navigates to file/directory
-2. User optionally space-selects multiple items
-3. User presses `x` (move/cut mark)
-4. Status bar updates: "3 file(s) marked for move"
-5. User navigates to target directory
-6. User presses `p` (paste):
-   a. Same pane, same directory → no-op (or show rename if name differs)
-   b. Same pane, different directory → move within filesystem
-   c. Other pane → transfer + delete source
-7. If cross-pane:
-   a. TransferModal shows copy progress
-   b. After successful copy, delete source files
-   c. If delete fails: report error, source files remain
-8. Status bar: "Moved 3 file(s)"
-9. Both panes refreshed, marks cleared
-```
+### Disk Space Consideration
 
----
-
-### Keyboard Binding Summary (v1.2 Additions)
-
-| Key | Context | Action | Conflicts |
-|-----|---------|--------|-----------|
-| `d` | Any pane | Delete selected item(s) | None (current bindings: no `d` in panes) |
-| `R` | Any pane | Rename current item | None (current bindings: no `R` in panes; lowercase `r` is recent dirs on remote) |
-| `m` | Any pane | Create directory | None (current bindings: no `m` in panes) |
-| `c` | Any pane | Mark for copy | None (current bindings: no `c` in panes) |
-| `x` | Any pane | Mark for move | None (current bindings: no `x` in panes) |
-| `p` | Any pane | Paste (copy or move) | None (current bindings: no `p` in panes) |
-| `y` | Confirm dialog | Confirm (yes) | None in pane context (future: yank to clipboard) |
-| `n` | Confirm dialog | Cancel (no) | None in pane context |
-
-**Key conflict analysis:** All proposed keys are free in the current key routing chain. The only potential conflict is `r` (lowercase) which is used for recent directories on remote pane. `R` (uppercase, Shift+R) is free in all contexts. `y` and `n` are only consumed by confirmation dialogs (overlay intercepts all keys when visible), so they don't conflict with any future use in pane context.
-
----
-
-### Existing Infrastructure Reuse
-
-| Component | Current Use | v1.2 Reuse |
-|-----------|-------------|------------|
-| `TransferModal` | File transfer progress/cancel/conflict | Cross-pane copy/move progress display |
-| `TransferService.UploadFile/UploadDir` | File upload | Cross-pane copy (local → remote) |
-| `TransferService.DownloadFile/DownloadDir` | File download | Cross-pane copy (remote → local) |
-| `SFTPService.MkdirAll` | Transfer directory creation | Remote mkdir |
-| `SFTPService.WalkDir` | Transfer directory walking | Delete scope counting, recursive copy |
-| `SFTPService.Stat` | Conflict resolution | Rename collision detection, delete scope |
-| `SFTPService.Remove` | Not yet used by UI | Single file delete |
-| `SFTPService.CreateRemoteFile` | Transfer | Not needed for file ops |
-| `domain.ConflictHandler` | Transfer conflicts | Same-pane copy conflict resolution |
-| `nextAvailableName()` | Transfer rename on conflict | Same-pane copy naming |
-| `Pane.SelectedFiles()` | Transfer multi-select | Delete/copy/move multi-select |
-| `Pane.GetCurrentPath()` | Transfer path resolution | All operations |
-| `Pane.Refresh()` | Post-transfer refresh | Post-operation refresh |
-| `handleGlobalKeys` | Global key routing | Add d/R/m/c/x/p routing |
-| Overlay draw chain (`Draw()`) | TransferModal + RecentDirs | Add ConfirmDialog + InputField overlays |
-
-**New infrastructure needed:**
-- `ConfirmDialog` — reusable yes/no dialog overlay (for delete confirmation)
-- `InputFieldOverlay` — reusable text input popup (for rename and mkdir)
-- `Clipboard` — mark state struct in FileBrowser
-- `FileOpsService` (or extend `FileService`) — delete, rename, mkdir, local copy
-- `SFTPClient.Rename()` — wrapper for pkg/sftp `client.Rename()`
-- `SFTPClient.RemoveAll()` — recursive directory removal
+The download-to-temp approach uses local disk space equal to the size of the transferred data. For large transfers, this could be significant. The status bar or transfer modal should show a warning for large directories.
 
 ---
 
 ## Sources
 
-- [Midnight Commander Cheat Sheet (GitHub Gist)](https://gist.github.com/samiraguiar/9cd4264445545cfd459d)
-- [MC Official Man Page](https://source.midnight-commander.org/man/mc.html)
-- [MC Recursive Delete Dialog — Ubuntu Manpage](https://manpages.ubuntu.com/manpages/focal//man1/mc.1.html)
-- [Ranger Cheatsheet (GitHub Gist)](https://gist.github.com/heroheman/aba73e47443340c35526755ef79647eb)
-- [Ranger PDF Keybindings](https://debian-install-notes.pages.dev/files/ranger-keybinds_quinton.pdf)
-- [Better Terminal File Management with Ranger](https://obaranovskyi.com/environments/better-terminal-file-management-with-ranger)
-- [lf Terminal File Manager Documentation](https://github.com/gokcehan/lf/blob/master/doc.md)
-- [lf Delete Behavior Discussion (GitHub Issue)](https://github.com/gokcehan/lf/issues/45)
-- [nnn Recursive Delete Per-File Prompt (Superuser)](https://superuser.com/questions/1623048/remove-a-folder-without-confirm-deletion-of-every-single-file-in-nnn-file-manage)
-- [UX StackExchange — Confirm or Undo](https://ux.stackexchange.com/questions/71960/deletion-confirm-or-undo-which-is-the-better-option-and-why)
-- [Nielsen Norman Group — Confirmation Dialog Guidelines](https://www.nngroup.com/articles/confirmation-dialog/)
-- [TUI File Navigation and Batch Rename with tview](https://joshalletto.com/posts/terminal-batch-rename/)
-- [tview InputField Wiki](https://github.com/rivo/tview/wiki/InputField)
-- Existing codebase: `internal/adapters/ui/file_browser/` (all files)
-- Existing codebase: `internal/core/ports/file_service.go`
-- Existing codebase: `internal/adapters/data/sftp_client/sftp_client.go`
-- Existing codebase: `internal/core/domain/transfer.go`
+- [Midnight Commander Remote Connect via Shell Link (4sysops)](https://4sysops.com/archives/midnight-commander-remote-connect-via-shell-link-copy-files-over-ssh-and-sftp-link-using-fish-and-public-key-authentication/)
+- [SCP Between Two Remote Hosts From Third PC (SuperUser)](https://superuser.com/questions/686394/scp-between-two-remote-hosts-from-my-third-pc)
+- [Transfer Files Between Two Remote SSH Servers (AskUbuntu)](https://askubuntu.com/questions/1116153/transfer-files-between-two-remote-ssh-servers)
+- [lf Documentation — History File](https://github.com/gokcehan/lf/blob/master/doc.md)
+- [lf History File Overwrite Bug (GitHub Issue #1450)](https://github.com/gokcehan/lf/issues/1450)
+- [Ranger Persistent History Request (GitHub Issue #1741)](https://github.com/ranger/ranger/issues/1741)
+- [Midnight Commander History Concurrency (GitHub Issue #4818)](https://github.com/MidnightCommander/mc/issues/4818)
+- [Yazi Bookmarks Plugin (yamb.yazi)](https://github.com/h-hg/yamb.yazi)
+- [Yazi Resources Page](https://yazi-rs.github.io/docs/resources/)
+- [Termius SFTP Documentation](https://termius.com/documentation/connect-with-sftp)
+- [Copy Files Between Two Remote SFTP Servers (SuperUser)](https://superuser.com/questions/204899/copy-files-between-two-remote-servers-with-sftp)
+- [Red Hat — Secure File Transfer SCP/SFTP](https://www.redhat.com/en/blog/secure-file-transfer-scp-sftp)
+- Existing codebase: `internal/adapters/ui/file_browser/recent_dirs.go` (RecentDirs pattern)
+- Existing codebase: `internal/adapters/data/transfer/transfer_service.go` (CopyRemoteFile/CopyRemoteDir pattern)
+- Existing codebase: `internal/adapters/ui/handlers.go` (server list key bindings)
+- Existing codebase: `internal/core/services/server_service.go` (AddServer, validateServer)
+- Existing codebase: `internal/core/domain/server.go` (Server struct with slices)
 
 ---
-*Features research: 2026-04-15 — v1.2 File Operations focus*
+*Features research: 2026-04-15 — v1.3 Enhanced File Browser focus*

@@ -1,522 +1,567 @@
-# Pitfalls Research: File Operations in Terminal SFTP File Browser (v1.2)
+# Pitfalls Research: v1.3 Enhanced File Browser
 
-**Domain:** tview/tcell TUI 双面板文件浏览器中添加文件管理操作（删除/重命名/新建/复制/移动）
+**Domain:** tview/tcell TUI 文件浏览器中添加三个增强功能：本地路径历史持久化、SSH 连接复制、双远端文件互传
 **Researched:** 2026-04-15
-**Confidence:** HIGH -- 基于代码审查、pkg/sftp 库文档分析、SFTP 协议规范
+**Confidence:** HIGH -- 基于现有代码深度审查、v1.0-v1.2 实际踩坑经验
 
 ## Critical Pitfalls
 
-### Pitfall 1: SFTP 协议没有原生 copy 操作 -- 远程复制必须 download+re-upload
+### Pitfall 1: 本地路径历史与远程目录 MRU 的持久化模型不一致
 
 **What goes wrong:**
-在远程面板按 `c` 标记文件后按 `p` 粘贴到另一个远程目录，实现者假设 SFTP 有服务端复制命令（类似本地 `cp`），直接调用某个 SFTP 方法。结果发现 SFTP 协议没有 copy 操作，代码无法编译或运行时报错。
+实现者参考现有 `RecentDirs` 的持久化模式（每个服务器一个 JSON 文件 `~/.lazyssh/recent-dirs/{user@host}.json`），为本地路径历史采用相同结构。但本地路径没有"服务器"维度，导致需要造一个假的 serverKey，或者把所有本地路径混在一个文件里，结果违反了现有记录粒度的设计约束。
 
 **Why it happens:**
-SFTP 协议（RFC 4254 + drafts）只定义了以下文件操作：
-- `open` / `close` / `read` / `write` -- 文件读写
-- `remove` / `rmdir` -- 删除
-- `rename` / `posix-rename` -- 重命名/移动
-- `mkdir` / `opendir` / `readdir` -- 目录操作
-- `stat` / `lstat` / `fstat` -- 文件信息
-- `symlink` / `readlink` / `realpath` -- 符号链接
+现有 `RecentDirs` 的持久化模型是**「本机目录 + 服务器」组合**（PROJECT.md Key Decision: "记录粒度为 本机目录 + 服务器 组合，避免跨服务器目录列表泄露"）。这个粒度对远程目录有意义，但对本地路径历史没有意义 -- 本地路径与具体服务器无关。
 
-**没有** `copy`、`copy-data`、`copy-file` 操作。
+更深层问题：`RecentDirs` 当前同时承担了两个职责：
+1. **数据层**：MRU 列表的 CRUD + 持久化（`loadFromDisk`, `saveToDisk`, `Record`, `GetPaths`）
+2. **UI 层**：overlay 弹出框（`Draw`, `HandleKey`, `Show`, `Hide`）
 
-OpenSSH 9.0+ 添加了 `copy-data` 扩展（非标准），但其 `sftp` 客户端的 `cp` 命令依赖服务端支持。pkg/sftp 库没有暴露 `copy-data` 扩展 API。
+如果本地路径历史也需要弹出列表（例如 `l` 键弹出本地历史），就会产生代码重复。但如果复用 `RecentDirs` 组件，就需要重构它以支持不同的持久化策略。
 
 **Consequences:**
-- 远程面板内的文件复制（同服务器内从一个目录复制到另一个目录）必须通过 **download 到临时文件 + upload 到目标路径** 实现
-- 这意味着远程复制比本地复制慢很多（数据经过本地中转）
-- 对于大文件或目录，用户会感受到明显的延迟
-- 如果实现者不知道这个限制，可能会花大量时间寻找不存在的 API
+- 本地路径历史如果没有服务器维度，与现有 MRU 模型不一致
+- 试图复用 `RecentDirs` 但发现它的 `serverKey` 硬编码到文件路径中
+- 如果为本地路径创建独立的组件，会与 `RecentDirs` 产生大量重复代码
+- 持久化路径命名冲突：`~/.lazyssh/recent-dirs/` 下放什么文件？
 
 **Prevention:**
-1. 在 `SFTPService` port 接口中，**不要**添加 `CopyRemoteFile` 方法 -- 这会误导实现者
-2. 远程复制应复用现有的 `TransferService.DownloadFile` + `TransferService.UploadFile` 模式
-3. 可以添加 `CopyRemoteToRemote(ctx, remoteSrc, remoteDst)` 高层方法，内部用临时文件实现：
-   - `DownloadFile(ctx, remoteSrc, tempLocalPath, ...)`
-   - `UploadFile(ctx, tempLocalPath, remoteDst, ...)`
-   - 清理临时文件
-4. 临时文件应放在系统临时目录（`os.TempDir()`），使用唯一名称避免冲突
-5. 在 UI 中明确提示用户：远程复制需要经过本地中转，速度取决于网络带宽
+1. 将本地路径历史的存储文件放在 `~/.lazyssh/local-path-history.json`（全局，无服务器维度）
+2. 不复用 `RecentDirs` 的 UI 组件（因为弹出列表的交互不同），但可以抽取公共的 MRU 数据逻辑到独立的 struct：
+   ```go
+   // PathHistory 纯数据层，无 UI 依赖
+   type PathHistory struct {
+       paths    []string
+       maxItems int
+       filePath string
+       log      *zap.SugaredLogger
+   }
+   func (ph *PathHistory) Record(path string) { ... }
+   func (ph *PathHistory) GetPaths() []string { ... }
+   func (ph *PathHistory) loadFromDisk() { ... }
+   func (ph *PathHistory) saveToDisk() { ... }
+   ```
+3. 如果需要弹出列表 UI，创建独立的 overlay 组件（类似 `RecentDirs` 但使用 `PathHistory` 作为数据源）
+4. 记录时机：在 `initiateTransfer` 和 `initiateDirTransfer` 成功后记录使用的本地路径（类似现有 `recentDirs.Record(fb.remotePane.GetCurrentPath())` 的模式）
+5. 路径记录应区分上传路径和下载路径？建议不区分 -- 用户的"最近本地路径"就是最近用过的路径，不分方向
 
 **Detection:**
-- 实现时搜索 `pkg/sftp` 的方法列表，找不到 `Copy` 方法
-- 如果代码中出现 `client.Copy()` 调用，说明踩了这个坑
+- 发现自己在 `RecentDirs` 的构造函数中传入空的 `serverHost` 或 `serverUser`
+- 本地路径历史的 JSON 文件路径命名与 `recent-dirs/` 目录下的文件混淆
+- 复制粘贴 `RecentDirs` 的 `Draw()` 和 `HandleKey()` 代码到新组件中
 
 **Phase to address:**
-实现复制功能时（可能需要单独的 phase 处理远程复制的特殊逻辑）
+本地路径历史持久化的第一个 phase -- 必须先确定数据模型和存储策略
 
-**Confidence:** HIGH -- 基于 pkg/sftp 官方文档和 SFTP 协议规范
+**Confidence:** HIGH -- 基于对 `RecentDirs` 源码的审查
 
 ---
 
-### Pitfall 2: SFTP Remove 不能删除非空目录 -- 递归删除需要自行实现
+### Pitfall 2: Dup SSH 连接的 `d` 键冲突 -- 服务器列表中 `d` 已绑定到删除
 
 **What goes wrong:**
-用户在远程面板按 `d` 删除一个包含文件和子目录的目录。实现者调用 `SFTPService.Remove(path)`，结果报错 `SSH_FX_FAILURE`（目录非空）。`pkg/sftp.Client.Remove` 的文档明确写道："if the specified directory is not empty" 会返回错误。
+PROJECT.md 写的是 "服务器列表 d 键复制配置创建新条目"，但现有代码中 `d` 键已经绑定到 `handleServerDelete()`（handlers.go:60-62）。直接按描述实现会在按 `d` 时删除服务器而不是复制。
 
 **Why it happens:**
-当前 `SFTPService` port 接口只暴露了 `Remove(path string) error`，其实现直接调用 `client.Remove()`。这个方法只能删除空目录或文件。
+需求描述中的快捷键与现有实现冲突。查看 `handleGlobalKeys`：
+```go
+case 'd':
+    t.handleServerDelete()
+    return nil
+```
 
-虽然 `pkg/sftp` 提供了 `RemoveAll(path string) error` 方法，可以递归删除目录，但当前 `SFTPService` 接口没有暴露它。需要扩展接口。
+此外，服务器表单的删除确认对话框中 `d`/`D` 也用于确认删除（handlers.go:407-410）。这意味着如果改变 `d` 的含义，删除操作将没有快捷键入口。
 
-**更深层的问题：**
-`pkg/sftp.RemoveAll` 的实现是逐个 `Remove` 文件和子目录。对于深层嵌套的大目录，这意味着大量的 SFTP 请求。如果连接在删除过程中断开，会留下部分删除的状态。
+**Consequences:**
+- 按预期实现会导致删除功能丢失快捷键
+- 如果保留 `d` 为删除，Dup 功能需要另一个键
+- 用户习惯被打破（v1.0-v1.2 用户已习惯 `d` = 删除）
 
 **Prevention:**
-1. 在 `SFTPService` port 接口中添加 `RemoveAll(path string) error` 方法
-2. 在 `SFTPClient` adapter 中使用 `pkg/sftp.Client.RemoveAll()` 实现
-3. 对于大型目录，考虑在 UI 中显示删除进度（已删除文件数/总文件数）
-4. 删除前先统计目录中的文件总数（用现有的 `WalkDir`），为进度显示提供数据
-5. 删除操作应在 goroutine 中执行，避免阻塞 UI（参考 `initiateTransfer` 的 goroutine 模式）
-6. 如果 `RemoveAll` 失败，记录已删除的文件列表，向用户报告部分删除状态
+1. Dup 操作必须使用不同的快捷键。推荐 `y`（"yank" 是 Unix 术语中的复制/拉取操作，与 vim 的 `y` 一致），或者 `D`（大写，与 `d` 区分）
+2. 如果选择 `D`：tview 的 `event.Rune()` 对大小写敏感，所以 `D` 和 `d` 是不同的键。但需注意某些终端在 Caps Lock 开启时可能不区分
+3. Dup 操作的完整流程：
+   - 在服务器列表中选中一个服务器
+   - 按 `y`（或 `D`）触发 Dup
+   - 复制当前 Server 的所有字段
+   - 修改 Alias（自动添加 `-copy` 后缀，例如 `myserver` -> `myserver-copy`）
+   - 调用 `ServerService.AddServer()` 写入 SSH config
+   - 刷新列表并滚动到新条目
+4. Dup 后应自动打开编辑表单，让用户修改 Alias 和其他字段（类似先 `Add` 再预填字段）
+5. 或者更简单的方案：Dup 后直接添加并选中，用户按 `e` 编辑
 
 **Detection:**
-- 删除非空目录时返回 `SSH_FX_FAILURE` 错误
-- 状态栏显示删除错误信息
+- 检查 `handleGlobalKeys` 中 `d` 的绑定目标
+- 如果代码中 `case 'd'` 调用的是 `handleServerDuplicate()` 而不是 `handleServerDelete()`
 
 **Phase to address:**
-实现删除功能的第一个 phase -- 必须在 port 接口扩展后才能实现 UI
+Dup SSH 连接的第一个 phase -- 开始前必须确认快捷键选择
 
-**Confidence:** HIGH -- 基于 pkg/sftp 官方文档和代码审查
+**Confidence:** HIGH -- 基于代码审查，`d` 键绑定已确认
 
 ---
 
-### Pitfall 3: 删除确认对话框与文件列表的竞态条件（TOCTOU）
+### Pitfall 3: 双远端传输的 SFTP 连接生命周期管理 -- 单连接 vs 双连接
 
 **What goes wrong:**
-用户选中一个文件，按 `d` 键弹出确认对话框。对话框显示 "Delete file.txt?"。在用户犹豫是否按 `y` 确认时，后台有其他进程（或另一个 SFTP 客户端）已经删除或重命名了该文件。用户按 `y` 确认后，删除操作失败，或者更糟的情况：另一个进程创建了同名的新文件，用户删除了错误的文件。
+现有 `FileBrowser` 持有一个 `sftpService`，连接到一台服务器。双远端传输需要同时连接两台服务器。实现者试图复用现有 `FileBrowser` 的架构，发现：
+1. `TransferService` 持有一个 `sftpService`（单连接），无法同时访问两台服务器
+2. `FileBrowser` 只有一个 `RemotePane`，UI 上只有一个远程面板
+3. `TransferModal` 的进度显示假设传输只有两个阶段（上传或下载），但双远端传输有四个阶段
 
 **Why it happens:**
-这是经典的 Time-of-Check-Time-of-Use (TOCTOU) 问题。确认对话框显示的是 "检查时" 的文件信息，但删除操作执行在 "使用时"。中间的时间窗口内文件系统可能已经改变。
+当前架构是围绕 "本地 <-> 单远程" 设计的：
+```go
+type transferService struct {
+    log  *zap.SugaredLogger
+    sftp ports.SFTPService  // 单连接
+}
+```
 
-在 lazyssh 的上下文中，这个问题的严重程度取决于：
-- 是否有其他 SFTP 客户端同时连接到同一服务器（常见场景）
-- 是否有后台进程在操作同一目录（cron jobs, 文件同步工具等）
+```go
+type FileBrowser struct {
+    ...
+    sftpService    ports.SFTPService  // 单连接
+    transferSvc    ports.TransferService
+    localPane      *LocalPane
+    remotePane     *RemotePane        // 单远程面板
+    ...
+}
+```
+
+双远端传输需要：
+- 两个独立的 SFTP 连接（SFTPClient 实例）
+- 两个 RemotePane（或至少两个 SFTPService 引用）
+- 新的 TransferService 方法（或独立的 service）处理 "远程 A -> 本地临时 -> 远程 B" 的三段式传输
+
+**Consequences:**
+- 无法复用现有 `TransferService` 的 `UploadFile`/`DownloadFile`（它们绑定到单个 `sftp` 字段）
+- 如果强行修改 `TransferService` 添加第二个 SFTP 连接，会破坏现有单连接场景的接口语义
+- 进度显示模型完全不同：不是 "Uploading file.txt"，而是 "Downloading from A: file.txt" -> "Uploading to B: file.txt"
+- 取消逻辑更复杂：需要关闭两个 SFTP 连接，清理本地临时文件
 
 **Prevention:**
-1. 确认对话框显示的信息应包含文件大小和修改时间（便于用户核对）
-2. 用户确认后，在执行删除前再次 `Stat` 目标文件，确认它仍然存在且未被修改
-3. 如果 `Stat` 返回的信息与对话框显示的不一致（大小或修改时间变化），显示 "File has changed since you selected it" 警告，让用户重新确认
-4. 如果文件不存在了，显示 "File no longer exists" 而不是报错
-5. 本地面板的竞态条件更容易发生（本地进程可能随时修改文件），远程面板相对少见但不应忽略
+1. **不要修改现有 `TransferService`**，它服务于 "本地 <-> 远程" 场景
+2. 创建新的 `RelayTransferService`（或 `DualRemoteTransferService`），接口如下：
+   ```go
+   type RelayTransferService interface {
+       // RelayFile transfers a file from one remote server to another via local machine.
+       // Phase 1: Download from source remote to local temp
+       // Phase 2: Upload from local temp to destination remote
+       RelayFile(ctx context.Context, srcServer domain.Server, srcPath string,
+           dstServer domain.Server, dstPath string,
+           onProgress func(RelayProgress), onConflict ConflictHandler) error
+
+       // RelayDir transfers a directory from one remote server to another via local machine.
+       RelayDir(ctx context.Context, srcServer domain.Server, srcPath string,
+           dstServer domain.Server, dstPath string,
+           onProgress func(RelayProgress), onConflict ConflictHandler) ([]string, error)
+   }
+   ```
+3. `RelayTransferService` 内部创建和管理两个临时的 `SFTPClient` 实例
+4. 进度回调 `RelayProgress` 需要包含阶段信息：
+   ```go
+   type RelayPhase int
+   const (
+       PhaseDownloadFromSource RelayPhase = iota
+       PhaseUploadingToDestination
+   )
+   type RelayProgress struct {
+       domain.TransferProgress
+       Phase    RelayPhase
+       SrcLabel string // "server-a:/path"
+       DstLabel string // "server-b:/path"
+   }
+   ```
+5. 传输完成后清理：关闭两个 SFTP 连接，删除临时文件/目录
+6. UI 层面，双远端传输可能需要一个独立于 `FileBrowser` 的新入口（服务器列表中选择两台服务器），而不是在现有 `FileBrowser` 内部添加
 
 **Detection:**
-- 删除操作偶尔报 "file not found" 或 "no such file"
-- 用户反馈 "我确认删除的文件和实际删除的文件不是同一个"
+- 发现自己在 `TransferService` 中添加 `srcSFTP` 和 `dstSFTP` 两个字段
+- 试图让一个 `SFTPClient` 同时服务两个服务器
+- `TransferModal` 的 `Show(direction, fileName)` 无法表达 "Relay from A to B" 的语义
 
 **Phase to address:**
-实现删除确认对话框的 phase
+双远端传输的第一个 phase -- 必须先设计连接管理和进度模型
 
-**Confidence:** HIGH -- TOCTOU 是文件操作的经典安全问题
+**Confidence:** HIGH -- 基于代码审查，现有架构确认是单连接设计
 
 ---
 
-### Pitfall 4: SFTP Rename 的跨文件系统限制
+### Pitfall 4: 双远端传输的本地临时文件空间耗尽
 
 **What goes wrong:**
-用户在远程面板按 `R` 重命名文件，或者用 `x` 标记后 `p` 粘贴到另一个目录（移动操作），操作失败并报错。某些 SFTP 服务器返回 `SSH_FX_FAILURE` 或 `EPERM`，原因是源路径和目标路径在不同的文件系统或挂载点上。
+用户从服务器 A 传输一个 50GB 的目录到服务器 B。中转流程：先下载到本地临时目录，再上传到目标。本地磁盘只有 30GB 可用空间，下载到一半时磁盘写满，下载失败，临时文件残留。
 
 **Why it happens:**
-SFTP 的 `rename` 操作底层映射到服务器的 `rename(2)` 系统调用。在 Unix 系统上，`rename()` 在跨文件系统时会失败（`EXDEV` 错误）。此外：
+双远端传输的 "download -> upload" 模式需要本地磁盘空间 >= 待传输文件大小。这与现有的 `CopyRemoteFile`/`CopyRemoteDir` 有同样的问题，但规模更大：
+- 现有远程复制是在同一台服务器内，文件大小通常可控
+- 双远端传输涉及不同服务器，文件可能非常大（备份数据库、日志归档等）
 
-- `pkg/sftp.Client.Rename` 遵循 SFTP 协议的 rename 语义，如果目标已存在则失败
-- `pkg/sftp.Client.PosixRename` 使用 OpenSSH 扩展 `posix-rename@openssh.com`，会替换已存在的目标（类似 Unix `rename(2)` 行为）
-- 某些 SFTP 服务器（非 OpenSSH）可能不支持 `PosixRename`
+更严重的是，如果使用 `DownloadDir` + `UploadDir` 的两阶段模式，中间的临时目录可能包含完整的目标文件树副本，占用空间等于源目录大小。
+
+**Consequences:**
+- 本地磁盘写满导致下载失败
+- 临时文件残留占用空间
+- 后续传输也失败（磁盘已满）
+- 用户不知道发生了什么（如果错误信息不清晰）
 
 **Prevention:**
-1. 移动操作应优先尝试 `PosixRename`（原子操作，最快），如果失败再 fallback 到 copy+delete
-2. Fallback 路径：`download + upload + delete source`（跨文件系统或服务器不支持时）
-3. 重命名操作应使用 `Rename`（更安全，不会意外覆盖已有文件）
-4. 如果重命名目标已存在，提示用户确认覆盖（类似现有的冲突处理对话框模式）
-5. 在 port 接口中分别暴露 `Rename` 和 `PosixRename`，让 service 层决定使用哪个
+1. **传输前检查本地磁盘可用空间**：
+   ```go
+   func checkDiskSpace(path string, required int64) error {
+       var stat syscall.Statfs_t
+       syscall.Statfs(path, &stat)
+       available := stat.Bavail * uint64(stat.Bsize)
+       if uint64(required) > available {
+           return fmt.Errorf("insufficient disk space: need %d, available %d", required, available)
+       }
+       return nil
+   }
+   ```
+   注意：对于目录传输，可能无法精确预知总大小（远程 `WalkDir` 不返回目录大小）。保守策略：检查可用空间 > 单文件大小（文件传输）或跳过检查但监控（目录传输）。
+2. 使用 `os.TempDir()` 确保临时文件在系统临时目录中（通常有自动清理机制）
+3. 传输失败时确保 `defer os.RemoveAll(tmpDir)` 清理所有临时文件
+4. 在进度 UI 中显示已使用的临时空间大小，让用户感知磁盘使用情况
+5. 考虑流式中转（边下载边上传），避免在本地存储完整文件。但这需要两个 SFTP 连接的协调，复杂度更高。v1.3 建议先用简单的两阶段模式，后续优化为流式。
 
 **Detection:**
-- 移动文件到不同挂载点时报 `SSH_FX_FAILURE`
-- 重命名时目标已存在导致操作失败
+- 传输到一半报 "no space left on device"
+- `os.TempDir()` 下残留大量 `lazyssh-*` 临时文件
+- 系统变慢因为磁盘 I/O 或 inode 耗尽
 
 **Phase to address:**
-实现重命名和移动功能的 phase
+双远端传输的数据层实现
 
-**Confidence:** HIGH -- 基于 pkg/sftp 官方文档
+**Confidence:** HIGH -- 磁盘空间是本地中转传输的固有限制
+
+---
+
+### Pitfall 5: 双远端传输中 SSH 认证失败 -- 密码提示阻塞 goroutine
+
+**What goes wrong:**
+双远端传输需要同时建立两个 SFTP 连接。其中一个服务器使用密码认证（不是密钥），`ssh` 进程在 `cmd.Start()` 后等待密码输入。但 SFTP 连接是在 goroutine 中建立的，没有终端交互能力。`ssh` 进程挂起等待密码，goroutine 永远不返回，UI 显示 "Connecting..." 但永远不会完成。
+
+**Why it happens:**
+现有 `SFTPClient.Connect()` 使用 `exec.Command("ssh", ...)` + `cmd.Start()`。对于密码认证的服务器：
+- `cmd.Start()` 启动 SSH 进程
+- SSH 进程尝试连接，发现需要密码
+- SSH 进程向 stdin 写密码提示（"user@host's password: "）
+- 但 `cmd.Stdin` 已经被重定向到 `sftp.NewClientPipe`，不会发送密码
+- SSH 进程挂起等待输入
+
+现有的单连接场景中，如果密码认证失败，`sftp.NewClientPipe()` 会超时或返回错误。但超时时间可能很长（SSH 默认超时），导致 UI 卡住。
+
+**Consequences:**
+- 连接建立长时间无响应
+- 用户以为程序崩溃
+- goroutine 泄漏（SSH 进程永远不会退出）
+
+**Prevention:**
+1. 在 `Connect()` 中设置 `cmd.WaitDelay`（Go 1.20+）或使用 `context.WithTimeout` 包裹 `cmd.Wait()`
+2. 为 SFTP 连接建立设置合理的超时（例如 10 秒）
+3. 连接失败时确保清理 SSH 进程（`cmd.Process.Kill()`）
+4. 在双远端传输的 UI 中，为每个连接分别显示连接状态（"Connecting to A...", "Connecting to B..."）
+5. 如果任一连接失败，立即取消另一个连接（不必要地占用资源）
+6. 考虑在双远端传输开始前先 Ping 两台服务器（复用现有的 `ServerService.Ping`），快速筛选不可达的服务器
+
+**Detection:**
+- 双远端传输开始后 UI 卡在 "Connecting..." 超过 10 秒
+- 系统进程列表中有挂起的 `ssh` 进程
+
+**Phase to address:**
+双远端传输的连接管理
+
+**Confidence:** HIGH -- 密码认证阻塞是 `exec.Command("ssh")` 模式的已知问题
 
 ---
 
 ## High Pitfalls
 
-### Pitfall 5: 递归操作阻塞 UI -- 缺少进度反馈
+### Pitfall 6: Dup SSH 连接后 metadata（标签、置顶、计数）的处理策略
 
 **What goes wrong:**
-用户删除一个包含数千个文件的大型目录，或复制/移动一个大型目录树。操作在 UI 线程中同步执行，终端完全冻结，无法取消，无法看到进度。用户以为程序崩溃了，强制终止进程。
+用户复制一个有标签（tags）、置顶（pinned）、SSH 使用次数（ssh_count）等 metadata 的服务器。复制后的新条目继承了所有 metadata，但这是不合理的：
+- 置顶状态：新服务器不应该被置顶（用户还没决定是否常用它）
+- SSH 使用次数：新服务器的使用次数应该为 0
+- LastSeen：新服务器从未连接过
+- 标签：标签是否应该复制？可能合理（用户可能想要相同的标签分类）
 
 **Why it happens:**
-当前代码中，文件传输（upload/download）已经使用了 goroutine + `QueueUpdateDraw` + `TransferModal` 进度显示的模式。但如果文件操作（删除、复制、移动）直接在 UI 线程中同步调用 SFTP 方法，就会阻塞 tview 的事件循环。
+现有的 `AddServer` 方法会调用 `metadataManager.updateServer(server, server.Alias)`，将 `server.Tags` 写入 metadata。如果 Dup 操作直接复制 `domain.Server` 的所有字段并调用 `AddServer`，所有 metadata 也会被写入。
 
-特别是 `SFTPClient.RemoveAll` -- 对于一个包含 10000 个文件的目录，它需要发送 10000+ 个 SFTP 请求（每个文件一次 remove + 每个目录一次 rmdir），每个请求需要网络往返（RTT）。在 50ms RTT 的连接上，这需要 500 秒（8+ 分钟）。
-
-**Prevention:**
-1. **所有耗时操作必须在 goroutine 中执行**，参考 `initiateTransfer` 的模式
-2. 对于递归删除，复用 `TransferModal` 显示进度（已删除 N/M 个文件）
-3. 对于远程复制（download+re-upload），复用现有的 `TransferModal` 进度显示
-4. 操作开始前先统计文件总数（`WalkDir`），为进度提供分母
-5. 支持取消操作：使用 `context.Context`，参考 `transferCancel` 的模式
-6. 如果操作耗时可能很长（>2秒），始终显示进度 UI
-
-**Detection:**
-- 执行文件操作时终端不响应按键
-- 按键有明显的延迟后才生效
-
-**Phase to address:**
-所有涉及递归操作的 phase（删除目录、复制目录、移动目录）
-
-**Confidence:** HIGH -- 基于代码审查，现有传输代码已正确处理此问题
-
----
-
-### Pitfall 6: 剪贴板标记状态在目录导航后失效或丢失
-
-**What goes wrong:**
-用户在远程面板 `/home/user/docs` 目录中按 `c` 标记文件 `report.txt`，然后导航到 `/home/user/docs/archive` 目录，按 `p` 粘贴。但粘贴操作失败或粘贴了错误的文件。
-
-**Why it happens:**
-当前代码中，`LocalPane` 和 `RemotePane` 都有 `selected map[string]bool`，但这是多选状态（space 键），不是复制/移动的剪贴板。v1.2 需要添加新的剪贴板状态，与现有的 `selected` 多选状态区分。
-
-关键问题：
-1. 剪贴板存储的应该是完整路径（`currentPath + fileName`），而不是仅文件名。因为导航后 `currentPath` 改变了
-2. 如果只存文件名，导航到另一个包含同名文件的目录后，粘贴的目标路径会出错
-3. 剪贴板需要区分操作类型：复制（copy）vs 剪切（move）
-4. 剪贴板状态需要在面板间共享（本地标记 -> 远程粘贴，或远程标记 -> 本地粘贴）
-
-**Prevention:**
-1. 定义独立的剪贴板结构体，存储完整路径、操作类型和来源面板
-2. 导航时不清除剪贴板状态（这是核心 UX 决策 -- 用户标记后导航到目标目录再粘贴是自然的工作流）
-3. 剪贴板状态在状态栏显示提示（例如 "2 files marked for copy"），让用户知道当前有标记
-4. 切换面板（Tab）或按 Esc 时清除剪贴板（避免用户忘记标记存在）
-5. 新的文件操作（删除/重命名/新建）不应清除剪贴板，除非操作影响了标记的文件
-
+查看 `metadataManager.updateServer`：
 ```go
-// 剪贴板数据结构
-type ClipboardState struct {
-    Files       []domain.FileInfo  // 标记的文件（含完整路径）
-    Operation   ClipboardOp        // Copy or Cut
-    SourcePane  int                // 0=local, 1=remote
-    SourcePath  string             // 来源目录的完整路径
-}
-
-type ClipboardOp int
-const (
-    ClipboardCopy ClipboardOp = iota
-    ClipboardCut
-)
-```
-
-**Detection:**
-- 粘贴时操作了错误的文件（因为路径计算错误）
-- 用户不知道当前有文件在剪贴板中，意外粘贴
-
-**Phase to address:**
-实现复制/移动标记功能的 phase
-
-**Confidence:** HIGH -- 基于终端文件管理器的常见 UX 模式和代码审查
-
----
-
-### Pitfall 7: SFTP 连接断开导致文件操作进行到一半
-
-**What goes wrong:**
-用户开始删除一个大型目录，删除到一半时 SSH 连接断开（网络中断、服务器重启、SSH 超时）。结果目录处于部分删除状态：一些文件被删除了，一些还在。用户无法知道哪些文件被删除了，也无法撤销。
-
-**Why it happens:**
-当前 `SFTPClient` 使用 `exec.Command("ssh", ...)` + `sftp.NewClientPipe()` 建立连接。SSH 连接可能在任何时候断开。`pkg/sftp` 在连接断开时会返回错误，但：
-- `RemoveAll` 可能已经删除了部分文件
-- 没有 "undo" 机制
-- 用户不知道操作进行到了哪一步
-
-**Prevention:**
-1. 在 goroutine 中执行操作，通过 `QueueUpdateDraw` 更新进度
-2. 操作失败时，在 UI 中显示已完成的操作数和错误信息
-3. 对于删除操作，无法撤销 -- 必须在确认对话框中明确警告用户（"This cannot be undone"）
-4. 对于移动操作（copy+delete），如果 delete 步骤失败，源文件仍然存在，目标文件可能部分存在。应提示用户检查两边的状态
-5. 对于复制操作（download+re-upload），如果 upload 步骤失败，临时文件应被清理（参考现有的 D-04 cancel cleanup 模式）
-6. 操作失败后自动刷新两个面板的文件列表
-
-**Detection:**
-- 操作中途返回 `EOF` 或 `connection lost` 错误
-- 重新连接后文件列表与操作前不一致
-
-**Phase to address:**
-所有文件操作的错误处理
-
-**Confidence:** HIGH -- 网络断开是 SFTP 操作的固有风险
-
----
-
-### Pitfall 8: 符号链接在递归操作中导致无限循环
-
-**What goes wrong:**
-远程服务器上有一个目录包含循环符号链接：`/home/user/dir/link -> /home/user/dir`。用户尝试删除或复制这个目录，程序进入无限递归，最终导致栈溢出或 goroutine 泄漏。
-
-**Why it happens:**
-当前 `SFTPClient.WalkDir` 的实现（walkDir 方法）递归遍历目录，对每个目录调用 `client.ReadDir`。如果遇到指向父目录的符号链接，会产生无限递归。
-
-查看现有代码：
-```go
-// walkDir (sftp_client.go:293-312)
-func (c *SFTPClient) walkDir(client *sftp.Client, path string, files *[]string) error {
-    entries, err := client.ReadDir(path)
+func (m *metadataManager) updateServer(server domain.Server, oldAlias string) error {
     ...
-    for _, e := range entries {
-        fullPath := path + "/" + e.Name()
-        if e.IsDir() {
-            if err := c.walkDir(client, fullPath, files); err != nil {
-                return err
-            }
-        } else {
-            *files = append(*files, fullPath)
-        }
+    merged.Tags = server.Tags
+    if !server.LastSeen.IsZero() {
+        merged.LastSeen = server.LastSeen.Format(time.RFC3339)
     }
+    if !server.PinnedAt.IsZero() {
+        merged.PinnedAt = server.PinnedAt.Format(time.RFC3339)
+    }
+    if server.SSHCount > 0 {
+        merged.SSHCount = server.SSHCount
+    }
+    ...
 }
 ```
 
-注意：`ReadDir` 对符号链接的行为取决于 SFTP 服务器。OpenSSH 的 `sftp-server` 默认跟随符号链接（`Readdir` 返回符号链接指向的内容）。如果符号链接指向一个目录，`e.IsDir()` 返回 true，递归会跟随进去。
-
-但 `pkg/sftp` 的 `ReadDir` 实际上返回的是 `os.FileInfo`，其中 `IsDir()` 对于指向目录的符号链接会返回 `false`（因为 mode 包含 `fs.ModeSymlink`）。所以当前实现可能不会跟随符号链接目录，但这是未明确保证的行为。
+如果复制的 `Server` 有 `PinnedAt` 非零，新服务器也会被置顶。
 
 **Prevention:**
-1. 在递归遍历中显式检查符号链接：如果 `e.Mode()&fs.ModeSymlink != 0`，跳过该条目（不跟随）
-2. 添加循环检测：维护已访问路径的 set，如果路径已访问过则跳过（防御性编程）
-3. 在 `domain.FileInfo` 中已经有 `IsSymlink` 字段，在递归操作中使用它来跳过符号链接
-4. 在删除确认对话框中提示用户目录包含符号链接（如果检测到）
-5. 递归操作时限制最大深度（例如 100 层），防止意外的深层嵌套
+1. Dup 操作后，清除新 Server 的非配置类 metadata：
+   ```go
+   dup := original
+   dup.Alias = generateDupAlias(original.Alias)
+   dup.PinnedAt = time.Time{}   // 不继承置顶
+   dup.LastSeen = time.Time{}   // 不继承 LastSeen
+   dup.SSHCount = 0             // 不继承使用次数
+   // dup.Tags = original.Tags  // 标签可以继承（用户可能需要）
+   ```
+2. 或者更简洁的方案：Dup 操作只复制 SSH config 字段（Host, Port, User, IdentityFile 等），不复制任何 metadata。Tags 在 `Server` 实体上，metadata 也在 `Server` 实体上，但 SSH config 中只有配置字段
+3. 需要区分 "SSH config 字段" 和 "lazyssh metadata 字段"。查看 `domain.Server` 的定义来确认哪些字段属于 SSH config，哪些属于 metadata
 
 **Detection:**
-- 递归操作时内存持续增长（goroutine 栈溢出）
-- 操作超时或 panic: runtime: goroutine stack exceeds
+- Dup 后新服务器出现在列表顶部（被置顶了）
+- Dup 后新服务器的 SSH 使用次数 > 0
 
 **Phase to address:**
-实现递归删除和递归复制的 phase -- 必须在 `WalkDir` 中修复符号链接处理
+Dup SSH 连接的实现
 
-**Confidence:** MEDIUM -- 基于代码分析，当前 walkDir 可能不受影响但行为未明确保证
+**Confidence:** HIGH -- 基于对 `metadataManager.updateServer` 的代码审查
+
+---
+
+### Pitfall 7: 双远端传输的进度重置问题 -- 四阶段 vs 两阶段
+
+**What goes wrong:**
+现有的 `TransferModal` 为两阶段传输设计（例如远程复制：下载 -> 上传）。`TransferModal.ResetProgress()` 在阶段切换时重置进度条。但双远端传输也是两阶段（下载 -> 上传），如果直接复用 `TransferModal`，用户看到的是：
+- 阶段 1: "Downloading: file.txt" 进度 0-100%
+- 阶段 2: "Uploading: file.txt" 进度 0-100%
+
+这看起来和远程复制完全一样，用户无法区分 "本地中转" 和 "远程复制"。而且进度条在阶段切换时重置为 0，用户可能误以为传输失败了又重新开始。
+
+**Why it happens:**
+现有的远程复制（`CopyRemoteFile`/`CopyRemoteDir`）和双远端传输都是 "download -> upload" 两阶段模式。`TransferModal` 的进度显示无法区分两者的区别。双远端传输需要显示更多信息：
+- 源服务器标签（"From: server-a"）
+- 目标服务器标签（"To: server-b"）
+- 当前阶段（"Phase 1/2: Downloading from server-a"）
+- 总体进度（如果可能的话）
+
+**Prevention:**
+1. 扩展 `TransferModal`（或创建 `RelayTransferModal`）支持四段式信息显示：
+   ```
+   Relay: server-a -> server-b
+   Phase 1/2: Downloading from server-a
+   file.txt  [=========>          ] 45%  12.3 MB/s  ETA 2m
+   ```
+   ```
+   Relay: server-a -> server-b
+   Phase 2/2: Uploading to server-b
+   file.txt  [=========>          ] 30%  8.7 MB/s  ETA 3m
+   ```
+2. 阶段切换时不重置进度条为 0，而是显示 "Phase 2/2" 标签让用户理解进度重置是正常的
+3. 或者使用两个独立的进度条（下载进度 + 上传进度），但这需要修改 `TransferModal` 的布局
+4. 传输完成后显示汇总：
+   ```
+   Relay Complete: server-a -> server-b
+   Downloaded: 150 MB in 12s (12.5 MB/s)
+   Uploaded: 150 MB in 18s (8.3 MB/s)
+   Temp files cleaned up
+   ```
+
+**Detection:**
+- 双远端传输时 `TransferModal` 的标题显示 "Uploading" 或 "Downloading" 而不是 "Relay"
+- 进度重置时用户困惑
+
+**Phase to address:**
+双远端传输的 UI 层实现
+
+**Confidence:** HIGH -- 基于对 `TransferModal` 源码的审查
+
+---
+
+### Pitfall 8: 本地路径历史的路径规范化和跨平台一致性
+
+**What goes wrong:**
+用户在 Windows 上使用 lazyssh，上传了 `C:\Users\test\Documents\file.txt`。路径被记录到 `~/.lazyssh/local-path-history.json`。下次用户打开文件浏览器时，历史列表显示 `C:\Users\test\Documents`，但用户当前的工作目录是 `C:\Users\test\documents`（大小写不同，但 Windows 文件系统不区分大小写）。路径匹配失败，高亮不工作。
+
+**Why it happens:**
+路径规范化在不同平台上不一致：
+- Linux/macOS：路径区分大小写，`/home/user` != `/Home/User`
+- Windows：路径不区分大小写，`C:\Users` == `c:\users`
+- Windows 有驱动器号（`C:\`），Linux/macOS 没有
+- macOS 文件系统（APFS）默认不区分大小写
+- 符号链接可能导致同一路径有不同表示
+
+现有的 `RecentDirs` 使用简单的字符串比较：
+```go
+isCurrent := path == rd.currentPath
+```
+
+**Prevention:**
+1. 记录路径时使用 `filepath.Clean()` 规范化（去除多余的 `.`、`..`、重复分隔符）
+2. 在 Linux 上不区分大小写比较（因为记录的路径可能来自不同的规范形式）
+3. 在 Windows 上使用 `filepath.Equal()` 或 `strings.EqualFold()` 比较
+4. 在 macOS 上，APFS 默认不区分大小写，应使用不区分大小写的比较
+5. 或者简化处理：只对显示路径做精确匹配，不做大小写归一化。用户的路径历史就是他们用过的路径，如果大小写不同就是不同的路径
+6. 跨平台路径分隔符：`filepath.Join()` 已经处理了这个问题（Windows 用 `\`，Unix 用 `/`）
+
+**Detection:**
+- Windows 上路径历史中的路径无法高亮当前目录
+- macOS 上同一路径的不同大小写形式被记录为两个条目
+
+**Phase to address:**
+本地路径历史的数据层实现
+
+**Confidence:** MEDIUM -- 跨平台路径规范化是已知难题，但 lazyssh 的使用场景（终端用户）通常在单一平台上
 
 ---
 
 ## Medium Pitfalls
 
-### Pitfall 9: 文件名编码问题 -- Unicode 特殊字符导致路径拼接错误
+### Pitfall 9: Dup 后的 Alias 命名冲突 -- 循环后缀
 
 **What goes wrong:**
-远程服务器上有包含 Unicode 字符的文件名（中文、日文、emoji、空格、特殊符号等）。用户尝试重命名或删除这些文件时，操作失败或操作了错误的文件。
+用户对 `myserver` 执行 Dup，生成 `myserver-copy`。再对 `myserver` 执行 Dup，又生成 `myserver-copy`，与已有条目冲突（`AddServer` 会报 "alias already exists"）。
 
 **Why it happens:**
-SFTP 协议使用 UTF-8 编码文件名（RFC），但：
-1. 远程服务器可能使用其他编码（GBK, Shift-JIS, Latin-1 等）
-2. 某些文件名包含控制字符或不可见字符
-3. 文件名中的空格或特殊字符可能导致路径拼接问题
-4. Unicode 规范化形式不同（NFC vs NFD）可能导致同一文件名的两种表示不匹配
-
-当前代码中的路径拼接：
-```go
-// joinPath (remote_pane.go:441-446)
-func joinPath(base, name string) string {
-    if strings.HasSuffix(base, "/") {
-        return base + name
-    }
-    return base + "/" + name
-}
-```
-
-这个简单的字符串拼接在大多数情况下工作正常，但如果 `name` 包含 `/`（在某些文件系统中合法），会产生路径遍历。
+简单的后缀策略（添加 `-copy`）不考虑已有别名。需要递增后缀或更智能的命名。
 
 **Prevention:**
-1. 路径拼接后使用 `filepath.Clean()` 或 `path.Clean()` 规范化路径（远程使用 `/` 分隔符，应使用 `path.Clean`）
-2. 在显示文件名时使用 `tview.Print` 而不是手动拼接（已正确处理 tview 标记字符）
-3. 文件名输入框（重命名/新建目录）应过滤掉控制字符（ASCII 0x00-0x1F）和路径分隔符（`/`, `\`）
-4. 验证路径不会产生 `..` 遍历（拼接后的规范路径应仍在预期目录下）
-5. 对于重命名操作，使用 SFTP 的 `Rename` API 而不是手动构造路径（SFTP 服务器处理编码转换）
+1. 实现递增后缀策略：`myserver` -> `myserver-copy` -> `myserver-copy-2` -> `myserver-copy-3`
+2. 在生成别名后、调用 `AddServer` 前，检查别名是否已存在（`serverExists`）
+3. 如果已存在，递增后缀直到找到可用的别名
+4. 或者使用时间戳后缀：`myserver-copy-20260415`，保证唯一性但不够友好
+5. Dup 后自动进入编辑模式，让用户修改别名（最佳 UX）
 
 **Detection:**
-- 包含中文/日文文件名的远程目录无法正确显示
-- 重命名包含空格的文件时操作失败
+- 第二次 Dup 同一个服务器时报 "alias already exists"
 
 **Phase to address:**
-实现重命名和新建目录输入框的 phase
+Dup SSH 连接的实现
 
-**Confidence:** MEDIUM -- 编码问题在不同服务器配置下表现不同
+**Confidence:** HIGH -- 别名冲突是 `AddServer` 的已知约束
 
 ---
 
-### Pitfall 10: 快捷键冲突 -- 新操作键与现有键绑定冲突
+### Pitfall 10: 双远端传输的入口 UX -- 如何选择两台服务器
 
 **What goes wrong:**
-v1.2 计划添加的快捷键（`d` 删除, `R` 重命名, `m` 新建目录, `c` 复制, `x` 剪切, `p` 粘贴）与现有键绑定或与 TransferModal 的键绑定冲突。
+用户需要选择两台不同的服务器进行互传。实现者设计了一个复杂的多步骤选择流程：
+1. 进入服务器列表
+2. 标记第一台服务器（Space 键）
+3. 标记第二台服务器
+4. 按某个键开始传输
+
+但这个流程与现有的服务器列表交互模式不一致。现有列表使用单选（j/k 导航 + Enter 连接），没有多选概念。
 
 **Why it happens:**
-现有键绑定分析：
-- `FileBrowser.handleGlobalKeys`: `Tab`, `Esc`, `F5`, `r`, `s`, `S`
-- `LocalPane.InputCapture`: `h`, `Space`, `.`, `Backspace`
-- `RemotePane.InputCapture`: `h`, `Space`, `.`, `Backspace`
-- `TransferModal.HandleKey`: `Esc`, `y`, `n`, `o`, `s`, `r`（冲突对话框模式）
-- `tview.Table` built-in: `j`, `k`, `Up`, `Down`, `Enter`, `PgUp`, `PgDn`
-
-潜在冲突：
-1. **`s` 键** -- 当前用于排序（`cycleSortField`），与文件操作无关，无冲突
-2. **`r` 键** -- 全局用于最近目录弹出，TransferModal 冲突对话框中用于 Rename。如果 v1.2 添加远程重命名功能（`R` 大写），需确保 `R` 不会与 `r` 冲突（tview 的 `Rune()` 区分大小写，所以 `R` 和 `r` 是不同的键）
-3. **`m` 键** -- 当前未使用，但 `M` 也未使用
-4. **`c` 键** -- 当前未使用，但 `C` 也未使用
-5. **`x` 键** -- 当前未使用
-6. **`p` 键** -- 当前未使用，但需注意 `P` 也未使用
-7. **`d` 键** -- 当前未使用。**关键冲突风险**：如果 TransferModal 可见时 `d` 被处理，可能导致在传输过程中执行删除操作
+当前服务器列表 UI（`tview.Table`）没有多选支持。远程面板有 `selected map[string]bool` 的多选（Space 键），但服务器列表没有。
 
 **Prevention:**
-1. 所有新快捷键的处理必须在 `handleGlobalKeys` 中添加守卫条件：如果 `transferModal.IsVisible()` 或 `recentDirs.IsVisible()`，不处理新快捷键
-2. 使用**大写字母**（`R`, `C`, `X`, `D`）作为文件操作键，与现有小写键区分
-3. `p` 粘贴使用小写（因为大写 `P` 在某些终端中需要 Shift，不方便）
-4. 维护一个完整的按键绑定矩阵文档，包含所有模式和所有按键
-5. 在状态栏中显示当前可用的快捷键（已有此模式）
+1. 使用两步选择模式：
+   - 步骤 1：用户选中服务器 A，按 `T`（Transfer）键
+   - 步骤 2：UI 进入 "Select destination server" 模式，标题栏提示 "Select destination server for relay transfer"
+   - 步骤 3：用户导航到服务器 B，按 Enter 确认
+   - 步骤 4：打开双远端文件浏览器（或直接开始传输）
+2. 或者使用 Space 键多选（两台），然后按 `T` 开始
+3. 状态栏提示应清晰指导用户操作："Select first server, press T"
+4. 不允许选择同一台服务器（源和目标必须不同）
+5. 选择完成后打开一个类似 `FileBrowser` 的双远端浏览器（左面板 = 服务器 A 的远程文件，右面板 = 服务器 B 的远程文件）
 
 **Detection:**
-- 在传输进度显示时按 `d` 意外触发删除
-- 在冲突对话框中按 `r` 触发重命名而不是 Rename
+- 服务器列表的 Space 键没有反应（因为没有多选实现）
+- 用户不知道如何选择第二台服务器
 
 **Phase to address:**
-实现键盘路由的第一个 phase
+双远端传输的 UI 入口实现
 
-**Confidence:** HIGH -- 基于代码审查，已有 TransferModal 按键冲突的先例（Pitfall 1 in v1.1）
+**Confidence:** HIGH -- UX 流程设计是双远端传输的核心挑战
 
 ---
 
-### Pitfall 11: 移动操作（Move）的原子性 -- copy+delete 不是原子的
+### Pitfall 11: 双远端传输中两个 SFTP 连接的并发问题
 
 **What goes wrong:**
-用户用 `x` 标记文件后 `p` 粘贴到另一个目录（移动操作）。实现者先 copy（download+upload）再 delete source。但如果 copy 成功后、delete 前连接断开，结果是文件同时存在于源和目标位置。用户不知道操作是否完成。
+双远端传输同时操作两个 SFTP 连接。如果两个连接共享某些状态（例如同一个 `*zap.SugaredLogger` 的并发写入、同一个临时目录的文件操作），可能产生竞态条件。
 
 **Why it happens:**
-远程移动有两种实现路径：
-1. **SFTP Rename** -- 原子操作（如果源和目标在同一文件系统）
-2. **Copy + Delete** -- 非原子操作（跨文件系统或跨服务器）
+Go 的 `sftp.Client` 不是线程安全的（尽管有 mutex 保护了 Connect/Close）。如果多个 goroutine 同时使用同一个 client，可能产生问题。
 
-`Copy + Delete` 的两步操作之间可能出现错误：
-- 网络断开
-- 权限不足（能读源但不能删源）
-- 磁盘空间不足（能读源但目标空间不够）
+在双远端传输中，如果使用两个独立的 `SFTPClient` 实例，每个实例有自己的 mutex 和 SSH 进程，理论上不会冲突。但如果实现不当（例如共享临时目录、共享 logger 的某些状态），仍可能有问题。
 
 **Prevention:**
-1. 移动操作优先尝试 `PosixRename`，失败后再 fallback 到 copy+delete
-2. copy+delete 的 delete 步骤应在 copy 完全成功后才执行
-3. 如果 delete 失败，在 UI 中明确告知用户："File copied but source could not be deleted. You may need to manually delete the source file."
-4. 在移动操作的进度显示中区分两个阶段："Copying..." 和 "Removing source..."
+1. 每个远程服务器使用独立的 `SFTPClient` 实例（独立的 SSH 进程、独立的 SFTP 连接）
+2. 临时目录使用 `os.MkdirTemp("", "lazyssh-relay-*")`，确保唯一性
+3. `zap.SugaredLogger` 是线程安全的，可以共享
+4. 下载和上传阶段是顺序执行的（不是并发的），因为上传需要下载完成后才能开始。所以不存在真正的并发访问
+5. 但如果未来想优化为流式中转（边下载边上传），需要考虑并发安全性
 
 **Detection:**
-- 移动后源文件仍然存在
-- 用户困惑：文件到底移动了还是复制了？
+- 双远端传输偶尔出现 "broken pipe" 或 "connection reset" 错误
+- 临时目录中出现损坏的文件
 
 **Phase to address:**
-实现移动功能的 phase
+双远端传输的数据层实现
 
-**Confidence:** HIGH -- copy+delete 非原子性是文件操作的固有风险
-
----
-
-### Pitfall 12: 新建目录名称验证不足
-
-**What goes wrong:**
-用户按 `m` 键弹出输入框，输入了无效的目录名（空字符串、仅空格、包含 `/` 或 `..` 的路径、已存在的目录名），创建操作失败或创建了意外的目录结构。
-
-**Why it happens:**
-输入框接受用户自由输入，但不验证输入是否为合法的目录名。特别危险的情况：
-- `../../etc` -- 路径遍历，在父目录之外创建目录
-- `existing_dir` -- 创建已存在的目录，SFTP `Mkdir` 返回错误
-- `` (空字符串) -- `Mkdir("")` 的行为未定义
-- `dir with / slash` -- 在某些系统中创建嵌套目录
-
-**Prevention:**
-1. 验证输入非空且不包含路径分隔符（`/`, `\`）
-2. 验证输入不包含 `..` 组件
-3. 验证输入不包含控制字符
-4. 检查目标位置是否已存在同名目录/文件（`Stat`），如果存在则提示用户
-5. 限制输入长度（例如 255 字符，大多数文件系统的文件名长度限制）
-6. 使用 `MkdirAll` 而不是 `Mkdir`（已存在于当前代码中），但仍然需要验证
-
-**Detection:**
-- 创建目录时报 "file exists" 或 "permission denied"
-- 意外在父目录之外创建了目录
-
-**Phase to address:**
-实现新建目录输入框的 phase
-
-**Confidence:** HIGH -- 输入验证是用户输入处理的基本要求
+**Confidence:** MEDIUM -- Go 的 `sftp.Client` 并发安全性取决于具体使用方式
 
 ---
 
 ## Low Pitfalls
 
-### Pitfall 13: 远程权限不足时的错误信息不友好
+### Pitfall 12: 本地路径历史的路径有效性 -- 已删除的目录仍在历史中
 
 **What goes wrong:**
-用户尝试删除或重命名远程文件，但当前 SSH 用户没有足够的权限。SFTP 返回 `SSH_FX_PERMISSION_DENIED`，UI 直接显示原始错误信息，用户不理解。
+用户上传了 `/home/user/project/build` 目录。该目录后来被删除了。但本地路径历史中仍然保留了这个路径。用户在弹出列表中选择这个路径，本地面板导航到该路径，显示空目录或错误。
 
 **Why it happens:**
-远程文件权限由服务器控制。常见场景：
-- 文件属于 root，当前用户是普通用户
-- 目录设置了 sticky bit，只有文件所有者能删除
-- 文件系统只读挂载
-- SSH 配置限制了 SFTP 操作（`ForceCommand internal-sftp` with chroot）
+`PathHistory.Record()` 只记录路径，不验证路径是否仍然存在。这是正确的行为（历史记录不应该因为路径被删除而自动移除），但在用户选择已删除路径时需要优雅处理。
 
 **Prevention:**
-1. 将 `SSH_FX_PERMISSION_DENIED` 错误翻译为用户友好的消息："Permission denied: you don't have rights to modify this file"
-2. 在错误信息中包含文件名和当前用户名
-3. 对于删除操作，如果权限不足，建议用户检查文件权限
+1. 用户选择历史路径后，先检查路径是否存在（`os.Stat(path)`）
+2. 如果路径不存在，在状态栏显示警告："Directory no longer exists: /path"，但不从历史中移除
+3. 如果路径存在但不可访问（权限问题），显示相应的错误信息
+4. 参考现有 `RecentDirs` 的行为：它也是直接导航到路径，不预先检查
+
+**Detection:**
+- 选择历史路径后本地面板显示空目录或 "permission denied"
 
 **Phase to address:**
-所有文件操作的错误处理
+本地路径历史的 UI 层实现
 
-**Confidence:** HIGH
+**Confidence:** HIGH -- 路径有效性是历史记录功能的常见问题
 
 ---
 
-### Pitfall 14: 操作后文件列表未刷新或刷新时机不对
+### Pitfall 13: Dup SSH 连接的 SSH config 注入 -- 复制包含 Match/Include 的配置块
 
 **What goes wrong:**
-用户删除了一个文件，但文件列表中仍然显示该文件。或者用户复制了一个文件到当前目录，但列表中没有显示新文件。
+用户的 SSH config 中有一个服务器配置使用了 `Match` 块或引用了 `Include` 指令。Dup 操作复制了这个配置块，但 `Match` 条件引用的是原服务器的特征（例如 `Match host old-server`），复制后的新服务器不匹配这些条件，导致配置不生效。
 
 **Why it happens:**
-文件操作后需要刷新受影响面板的文件列表。当前代码中，文件传输成功后会刷新目标面板（`fb.remotePane.Refresh()` 或 `fb.localPane.Refresh()`）。文件操作也需要类似的刷新逻辑。
+SSH config 的 `Host` 块可能包含复杂的指令，包括 `Match`（在文件末尾，不是在 Host 块内）、`Include`（引用外部文件）、`ProxyJump`（引用其他 Host 别名）。Dup 操作只复制 `Host` 块内的指令，不处理这些引用关系。
 
-但刷新时机很关键：
-1. 如果在 goroutine 中执行操作，刷新必须在 `QueueUpdateDraw` 中调用（线程安全）
-2. 如果操作涉及两个面板（例如从本地复制到本地另一个目录），两个面板都需要刷新
-3. 删除当前目录中的文件后，需要刷新当前面板，并且需要调整选中行（如果删除的文件在选中行之上）
+查看现有的 `createHostFromServer` 和 `updateHostNodes` 方法，它们只处理 `Server` 实体上的字段，不涉及 `Match` 块。
 
 **Prevention:**
-1. 每个文件操作完成后，刷新所有受影响的面板
-2. 刷新后尝试保持选中位置（记住删除前选中的文件名，刷新后找到最近的文件选中）
-3. 使用 `QueueUpdateDraw` 确保线程安全
+1. Dup 操作只复制 `Host` 块内的字段（`Host`, `HostName`, `User`, `Port`, `IdentityFile` 等），不涉及 `Match` 块
+2. 复制后检查 `ProxyJump` 字段：如果引用了其他 Host 别名，提示用户可能需要更新
+3. `Include` 指令通常在文件级别，不在 Host 块内，Dup 不会影响
+4. 大多数情况下 Dup 操作是安全的，因为 `Host` 块是自包含的
+
+**Detection:**
+- Dup 后 SSH 连接失败（因为 `ProxyJump` 引用了不存在的别名）
+- SSH config 语法错误（因为复制引入了不完整的配置）
 
 **Phase to address:**
-所有文件操作的完成后处理
+Dup SSH 连接的实现
 
-**Confidence:** HIGH -- 基于代码审查，现有传输代码已正确处理刷新
-
----
-
-### Pitfall 15: 确认对话框中 `y` 键误触发
-
-**What goes wrong:**
-用户在确认对话框中输入 `y` 确认删除，但 `y` 键被 tview 的 InputHandler 处理为其他操作（例如移动到以 `y` 开头的文件）。
-
-**Why it happens:**
-如果确认对话框没有正确拦截按键，`y` 可能泄漏到背景的 Table 组件。tview 的 Table 在搜索模式下会跳转到以输入字母开头的文件（虽然这个行为取决于具体配置）。
-
-**Prevention:**
-1. 确认对话框必须消费所有按键（返回 nil），不传递给背景组件
-2. 参考现有 TransferModal 的模式：在 `modeCancelConfirm` 和 `modeConflictDialog` 中消费所有按键
-3. 确认对话框显示时，通过 `handleGlobalKeys` 的守卫条件拦截按键
-
-**Phase to address:**
-实现确认对话框的 phase
-
-**Confidence:** HIGH -- 基于现有 TransferModal 的模式
+**Confidence:** MEDIUM -- 取决于用户 SSH config 的复杂度
 
 ---
 
@@ -524,10 +569,10 @@ v1.2 计划添加的快捷键（`d` 删除, `R` 重命名, `m` 新建目录, `c`
 
 | Shortcut | Description | Long-term Cost | When Acceptable |
 |----------|-------------|----------------|-----------------|
-| 远程复制用 download+upload 实现 | 不需要等待 SFTP copy-data 扩展标准化 | 大文件复制慢（数据经过本地中转），消耗本地临时磁盘空间 | Now -- SFTP copy-data 不是标准协议，pkg/sftp 不支持 |
-| 删除操作不记录被删除文件列表 | 代码更简单，不需要维护删除日志 | 无法提供 "undo" 功能，错误删除后无法恢复 | Now -- undo 需要回收站机制，复杂度高 |
-| 递归操作使用 RemoveAll 而不是逐文件删除 | 代码更少 | 无法提供细粒度的进度和取消 | Now -- 如果用户反馈需要，后续可以替换为自定义实现 |
-| 符号链接在递归操作中直接跳过 | 简单安全 | 用户可能期望符号链接被跟随或被保留 | Now -- 符号链接处理策略需要用户调研 |
+| 双远端传输用 download+upload 两阶段实现 | 实现简单，复用现有 TransferService | 需要本地临时磁盘空间，传输速度受限于较慢的链路 | Now -- 流式中转（边下载边上传）需要更复杂的协调逻辑 |
+| 本地路径历史用全局单一文件存储 | 不需要按服务器分文件 | 路径数量可能增长过大，加载/保存性能下降 | Now -- 10-20 条 MRU 不会造成性能问题 |
+| Dup 操作不处理 ProxyJump 引用 | 减少实现复杂度 | 复制使用 ProxyJump 的服务器后连接可能失败 | Now -- 大多数用户的 ProxyJump 引用在 Dup 后仍然有效 |
+| 双远端传输复用 TransferModal | 减少 UI 组件数量 | TransferModal 的两阶段模型可能无法完美适配四阶段信息 | Now -- 如果发现不够用再创建 RelayTransferModal |
 
 ---
 
@@ -535,33 +580,33 @@ v1.2 计划添加的快捷键（`d` 删除, `R` 重命名, `m` 新建目录, `c`
 
 | Integration | Common Mistake | Correct Approach |
 |-------------|----------------|------------------|
-| handleGlobalKeys + 新快捷键 | 直接在 `switch event.Rune()` 中添加 case，没有检查 overlay 可见性 | 在处理新快捷键前检查 `transferModal.IsVisible()` 和其他 overlay 状态 |
-| SFTPService.Remove + 非空目录 | 调用 `Remove()` 删除非空目录 | 添加 `RemoveAll()` 方法到 port 接口 |
-| SFTPService.Rename + 目标已存在 | 调用 `Rename()` 期望覆盖目标 | 使用 `PosixRename` 或先检查目标是否存在再提示用户 |
-| ClipboardState + 导航 | 导航时清除剪贴板 | 导航时保留剪贴板状态，在状态栏显示提示 |
-| QueueUpdateDraw + 文件操作 | 在 goroutine 中直接调用 `pane.Refresh()` | 所有 UI 更新必须包裹在 `app.QueueUpdateDraw()` 中 |
-| TransferModal + 删除确认 | 复用 TransferModal 的冲突对话框模式来显示删除确认 | 删除确认是一个独立的对话框，应该有独立的模式（或在 TransferModal 中添加新模式） |
-| FileBrowser.Draw() + 新 overlay | 新的确认对话框 overlay 没有在 Draw() 中绘制 | 在 FileBrowser.Draw() 中添加新 overlay 的绘制调用 |
+| PathHistory + FileBrowser | 在 `initiateTransfer` 中直接操作路径历史 | 通过回调或事件通知路径历史记录新路径 |
+| Dup + ServerForm | 直接复制 Server struct 并调用 AddServer | 清除 metadata 字段，修改 Alias 后再 AddServer |
+| Dup + handleGlobalKeys | 将 `d` 键改为 Dup 功能 | 使用不同的键（`y` 或 `D`），保留 `d` 为删除 |
+| RelayTransfer + TransferModal | 复用 TransferModal 的两阶段进度显示 | 扩展 TransferModal 或创建 RelayTransferModal，显示源/目标服务器标签 |
+| RelayTransfer + SFTPClient | 复用 FileBrowser 的 sftpService 连接 | 创建独立的 SFTPClient 实例，传输完成后关闭 |
+| RelayTransfer + context.Cancel | 只取消一个 SFTP 连接 | 使用同一个 ctx 取消两个连接，确保对称清理 |
+| 本地路径历史 + RecentDirs | 复用 RecentDirs 组件处理本地路径 | 抽取 PathHistory 数据层，RecentDirs 只处理远程路径 |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **删除非空目录**: 删除包含文件和子目录的远程目录能正确完成 -- verify: 创建多层级目录，删除整个目录
-- [ ] **删除进度**: 大型目录删除时显示进度 -- verify: 删除包含 100+ 文件的目录，观察进度显示
-- [ ] **删除取消**: 删除过程中可以取消 -- verify: 开始删除大型目录，按 Esc 取消
-- [ ] **远程复制**: 远程面板内复制文件到另一个远程目录能成功 -- verify: 在远程面板标记文件，导航到另一个目录，粘贴
-- [ ] **远程复制临时文件清理**: 远程复制后临时文件被清理 -- verify: 检查 `os.TempDir()` 无残留文件
-- [ ] **移动跨文件系统**: 移动文件到不同挂载点时 fallback 正确 -- verify: 如果可能，测试跨挂载点移动
-- [ ] **重命名目标已存在**: 重命名为已存在的文件名时有确认提示 -- verify: 尝试重命名为目录中已有文件名
-- [ ] **剪贴板跨面板**: 本地标记文件，Tab 切换到远程面板，粘贴能上传 -- verify: 本地标记 -> Tab -> 远程粘贴
-- [ ] **剪贴板状态显示**: 有文件在剪贴板中时状态栏有提示 -- verify: 标记文件后查看状态栏
-- [ ] **新建目录验证**: 输入无效目录名时有错误提示 -- verify: 尝试输入空名称、包含 `/` 的名称
-- [ ] **符号链接安全**: 递归删除包含循环符号链接的目录不会无限循环 -- verify: 创建循环符号链接目录，尝试删除
-- [ ] **Unicode 文件名**: 操作包含中文/日文/空格的文件名能成功 -- verify: 对含 Unicode 文件名的文件执行各种操作
-- [ ] **操作后刷新**: 操作完成后文件列表正确更新 -- verify: 删除文件后列表不再显示该文件
-- [ ] **权限错误**: 权限不足时显示友好错误信息 -- verify: 尝试删除无权限的远程文件
-- [ ] **快捷键不泄漏**: 确认对话框中按键不泄漏到背景 Table -- verify: 在确认对话框中按各种字母键
+- [ ] **本地路径持久化**: 关闭 lazyssh 后重新打开，路径历史仍然存在 -- verify: 记录路径 -> 退出 -> 重新启动 -> 检查 JSON 文件
+- [ ] **本地路径弹出列表**: 按 `l` 键（或设计的快捷键）弹出本地路径历史列表 -- verify: 记录至少 2 条路径，弹出列表，选择路径导航
+- [ ] **本地路径记录时机**: 上传和下载都记录本地路径 -- verify: 上传文件后检查本地路径是否被记录，下载文件后检查
+- [ ] **Dup 快捷键不冲突**: Dup 快捷键不与删除冲突 -- verify: 在服务器列表按 `d` 仍然删除，按 Dup 键复制
+- [ ] **Dup Alias 唯一**: 连续 Dup 同一服务器不产生别名冲突 -- verify: 对同一服务器执行 3 次 Dup
+- [ ] **Dup 不继承 metadata**: 复制后的服务器不被置顶、SSH 计数为 0 -- verify: 复制一个置顶的服务器，检查新条目
+- [ ] **Dup 后可编辑**: 复制后可以编辑新服务器的配置 -- verify: Dup 后按 `e` 编辑
+- [ ] **双远端连接建立**: 两台服务器的 SFTP 连接都能成功建立 -- verify: 选择两台不同服务器，连接都显示 "Connected"
+- [ ] **双远端文件传输**: 从服务器 A 下载到本地再上传到服务器 B 能成功 -- verify: 传输一个小文件
+- [ ] **双远端进度显示**: 进度显示包含源/目标服务器信息 -- verify: 观察传输进度 UI
+- [ ] **双远端取消**: 传输过程中可以取消 -- verify: 开始传输大文件，按 Esc 取消
+- [ ] **双远端临时文件清理**: 传输完成后临时文件被清理 -- verify: 检查 `os.TempDir()` 无残留
+- [ ] **双远端连接清理**: 传输完成后两个 SFTP 连接都被关闭 -- verify: 检查无残留 `ssh` 进程
+- [ ] **同服务器选择拒绝**: 双远端传输不允许选择同一台服务器 -- verify: 尝试选择同一台服务器作为源和目标
+- [ ] **跨平台路径历史**: Windows/macOS/Linux 上路径历史正常工作 -- verify: 在不同平台上记录和显示路径
 
 ---
 
@@ -569,14 +614,16 @@ v1.2 计划添加的快捷键（`d` 删除, `R` 重命名, `m` 新建目录, `c`
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| P1: SFTP 无 copy | LOW | 实现为 download+upload，用临时文件，清理临时文件 |
-| P2: Remove 不能删非空目录 | LOW | 使用 `RemoveAll()` 或实现自定义递归删除 |
-| P3: TOCTOU 竞态 | LOW | 删除前再次 Stat 验证，失败时友好提示 |
-| P4: Rename 跨文件系统 | MEDIUM | 先尝试 PosixRename，失败后 fallback 到 copy+delete |
-| P5: 递归操作阻塞 UI | MEDIUM | 重构为 goroutine + QueueUpdateDraw 模式 |
-| P6: 剪贴板路径失效 | LOW | 使用完整路径存储，导航时不清除剪贴板 |
-| P7: 连接断开 | MEDIUM | 显示已完成的操作数，建议用户重新连接后检查 |
-| P8: 符号链接循环 | MEDIUM | 检查 IsSymlink 跳过，添加路径已访问检测 |
+| P1: 路径历史模型不一致 | MEDIUM | 早期确定数据模型，重构成本取决于代码量 |
+| P2: `d` 键冲突 | LOW | 选择不同快捷键，零代码修改 |
+| P3: 单连接架构限制 | HIGH | 创建独立的 RelayTransferService，不修改现有代码 |
+| P4: 磁盘空间耗尽 | LOW | 传输前检查空间，失败时 defer 清理临时文件 |
+| P5: 密码认证阻塞 | MEDIUM | 设置连接超时，确保进程清理 |
+| P6: metadata 继承 | LOW | Dup 时清除非配置类字段 |
+| P7: 进度重置困惑 | LOW | 在 UI 中标注阶段信息 |
+| P8: 路径规范化 | LOW | 使用 `filepath.Clean()`，不区分大小写比较 |
+| P9: 别名冲突 | LOW | 实现递增后缀策略 |
+| P10: 入口 UX | MEDIUM | 两步选择模式，清晰的状态栏提示 |
 
 ---
 
@@ -584,37 +631,31 @@ v1.2 计划添加的快捷键（`d` 删除, `R` 重命名, `m` 新建目录, `c`
 
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
-| P1: SFTP 无 copy | 远程复制实现 | 远程面板内复制文件能成功 |
-| P2: Remove 不能删非空目录 | Port 接口扩展 | 删除非空远程目录能成功 |
-| P3: TOCTOU 竞态 | 确认对话框实现 | 删除前再次 Stat 验证 |
-| P4: Rename 跨文件系统 | 重命名/移动实现 | 跨文件系统移动有 fallback |
-| P5: 递归操作阻塞 UI | 所有递归操作 | 大型目录操作时 UI 不冻结 |
-| P6: 剪贴板路径失效 | 复制/移动标记实现 | 标记后导航再粘贴能成功 |
-| P7: 连接断开 | 错误处理 | 断连后显示已完成操作数 |
-| P8: 符号链接循环 | WalkDir 修复 + 递归操作 | 循环符号链接目录不导致无限循环 |
-| P9: Unicode 编码 | 输入框实现 | Unicode 文件名操作正常 |
-| P10: 快捷键冲突 | 键盘路由实现 | 所有模式下按键不冲突 |
-| P11: 移动非原子 | 移动实现 | 移动失败时提示用户检查 |
-| P12: 目录名验证 | 新建目录实现 | 输入无效名称有提示 |
-| P13: 权限错误信息 | 错误处理 | 权限不足时显示友好消息 |
-| P14: 刷新时机 | 所有操作 | 操作后列表正确更新 |
-| P15: 确认对话框按键泄漏 | 确认对话框 | 对话框中按键不泄漏 |
+| P1: 路径历史模型 | 本地路径历史数据层 | 路径历史独立于 RecentDirs，有独立存储文件 |
+| P2: `d` 键冲突 | Dup SSH 连接 UI 层 | Dup 使用非 `d` 快捷键 |
+| P3: 单连接架构 | 双远端传输数据层 | RelayTransferService 使用独立 SFTPClient 实例 |
+| P4: 磁盘空间 | 双远端传输数据层 | 传输前检查空间，失败时清理临时文件 |
+| P5: 密码认证阻塞 | 双远端传输连接管理 | 连接有超时，失败时清理进程 |
+| P6: metadata 继承 | Dup SSH 连接实现 | 复制后 PinnedAt=0, SSHCount=0 |
+| P7: 进度重置 | 双远端传输 UI 层 | 进度显示包含阶段信息 |
+| P8: 路径规范化 | 本地路径历史数据层 | `filepath.Clean()` 处理，跨平台测试 |
+| P9: 别名冲突 | Dup SSH 连接实现 | 连续 Dup 不产生别名冲突 |
+| P10: 入口 UX | 双远端传输 UI 入口 | 两步选择模式，状态栏提示清晰 |
+| P11: 并发问题 | 双远端传输数据层 | 两个独立 SFTPClient 实例 |
+| P12: 路径有效性 | 本地路径历史 UI 层 | 选择已删除路径时显示警告 |
+| P13: SSH config 注入 | Dup SSH 连接实现 | 复制后 SSH 连接正常 |
 
 ---
 
 ## Sources
 
-- [pkg/sftp 官方文档](https://pkg.go.dev/github.com/pkg/sftp) -- HIGH confidence: Remove, RemoveAll, Rename, PosixRename, Lstat, ReadLink 方法文档
-- [OpenSSH PROTOCOL file](https://github.com/openssh/libopenssh/blob/master/ssh/PROTOCOL) -- HIGH confidence: copy-data 扩展规范
-- [SFTP copy without roundtrip - SuperUser](https://superuser.com/questions/1166354/copy-file-on-sftp-to-another-directory-without-roundtrip) -- HIGH confidence: 确认 SFTP 无原生 copy
-- [SFTP remote server side copy - rclone forum](https://forum.rclone.org/t/sftp-remote-server-side-copy/41867) -- MEDIUM confidence: 社区对 SFTP copy 限制的讨论
-- [pkg/sftp SSH_FX_FAILURE for removing directories #137](https://github.com/pkg/sftp/issues/137) -- HIGH confidence: Remove 非空目录的限制
-- [OWASP Unicode Encoding](https://owasp.org/www-community/attacks/Unicode_Encoding) -- MEDIUM confidence: Unicode 编码安全问题
-- [Path Traversal in SFTP QUOTE command - HackerOne](https://hackerone.com/reports/3293177) -- HIGH confidence: SFTP 路径遍历漏洞
-- [sindresorhus/del race condition #43](https://github.com/sindresorhus/del/issues/43) -- MEDIUM confidence: 异步文件删除竞态条件
-- [lf file manager documentation](https://github.com/gokcehan/lf/blob/master/doc.md) -- LOW confidence: 终端文件管理器剪贴板模式参考
-- 项目源码分析 -- HIGH confidence: SFTPClient, TransferModal, handleGlobalKeys, WalkDir 现有实现
+- 项目源码深度审查 -- HIGH confidence: `RecentDirs`, `TransferService`, `SFTPClient`, `FileBrowser`, `ServerService`, `Repository`, `metadataManager`, `handlers.go`
+- PROJECT.md Key Decisions -- HIGH confidence: 记录粒度决策、快捷键设计决策
+- `pkg/sftp` 文档 -- HIGH confidence: SFTP 协议限制、客户端并发安全性
+- Go `os/exec` 文档 -- HIGH confidence: `cmd.Start()` + `cmd.StdinPipe()` 的密码认证行为
+- Go `filepath` 文档 -- HIGH confidence: `filepath.Clean()`, `filepath.Equal()` 跨平台行为
+- v1.0-v1.2 实际踩坑经验 -- HIGH confidence: overlay 绘制链、goroutine + QueueUpdateDraw、快捷键冲突
 
 ---
-*Pitfalls research for: lazyssh v1.2 File Operations*
+*Pitfalls research for: lazyssh v1.3 Enhanced File Browser*
 *Researched: 2026-04-15*
