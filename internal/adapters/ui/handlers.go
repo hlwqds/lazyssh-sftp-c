@@ -187,13 +187,18 @@ func (t *tui) handleServerMark() {
 }
 
 // handleDualRemoteBrowser opens the dual remote file browser for cross-server transfer.
-// TODO: Phase 12 — implement DualRemoteFileBrowser component and wire it here.
 func (t *tui) handleDualRemoteBrowser(source, target domain.Server) {
-	// TODO(Phase 12): Create DualRemoteFileBrowser with source and target SFTP connections.
-	t.showStatusTempColor(
-		fmt.Sprintf("Dual remote: %s <-> %s (not yet implemented)", source.Alias, target.Alias),
-		"#5FAFFF",
+	fb := file_browser.NewDualRemoteFileBrowser(
+		t.app,
+		t.logger,
+		source,
+		target,
+		func() {
+			t.returnToMain()
+		},
 	)
+	t.app.SetRoot(fb, true)
+	t.app.Sync()
 }
 
 func (t *tui) handleSortToggle() {
