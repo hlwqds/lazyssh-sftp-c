@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: File Operations
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-04-15T02:03:01.699Z"
-last_activity: 2026-04-15 -- Completed 06-01 FileService interface extension, 06-02 overlay components
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-04-15T02:12:57.280Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 38
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 6 of 8 (Basic File Operations) — EXECUTING
-Plan: 2 of 3 in current phase (next: 06-03)
-Status: Wave 1 complete, ready for Wave 2
+Plan: 3 of 3 in current phase (next: 06-03)
+Status: Ready to execute
 Last activity: 2026-04-15
 
 Progress: [████████████░░░░░░░░░░] 38% (5/8 phases shipped)
@@ -52,6 +52,7 @@ Progress: [████████████░░░░░░░░░░] 3
 *Updated after each plan completion*
 | Phase 06 P01 | 3min | 1 tasks | 7 files |
 | Phase 06 P02 | 206s | 2 tasks | 4 files |
+| Phase 06 P03 | 290s | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 5]: RecentDirs stored in FileBrowser (not per-pane), keyed by host+directory for cross-server isolation
 - [Phase 3]: TransferModal multi-mode state machine (progress/cancelConfirm/conflictDialog/summary)
 - [Phase 2]: 32KB buffer with onProgress callback for transfer progress tracking
+- [Phase 06]: InputDialog highest overlay priority -- text input must consume all keys
+- [Phase 06]: All file operations (delete/rename/mkdir) execute in goroutines with QueueUpdateDraw for non-blocking UI
+- [Phase 06]: Rename conflict uses two-step flow: InputDialog -> Stat -> ConfirmDialog (no simultaneous overlays)
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T02:03:01.694Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-04-15T02:12:57.276Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
