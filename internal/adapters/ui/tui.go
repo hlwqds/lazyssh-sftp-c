@@ -18,6 +18,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"go.uber.org/zap"
 
+	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/Adembc/lazyssh/internal/core/ports"
 	"github.com/rivo/tview"
 )
@@ -49,6 +50,9 @@ type tui struct {
 	content *tview.Flex
 
 	sortMode SortMode
+
+	markSource *domain.Server
+	markTarget *domain.Server
 }
 
 func NewTUI(logger *zap.SugaredLogger, ss ports.ServerService, fs ports.FileService, sftp ports.SFTPService, ts ports.TransferService, version, commit string) App {
@@ -104,7 +108,11 @@ func (t *tui) buildComponents() *tui {
 
 	t.serverList = NewServerList().
 		OnSelectionChange(t.handleServerSelectionChange).
-		OnReturnToSearch(t.handleReturnToSearch)
+		OnReturnToSearch(t.handleReturnToSearch).
+		OnMarkState(func() (*domain.Server, *domain.Server) {
+			return t.markSource, t.markTarget
+		}).
+		OnMarkClear(t.handleMarkClear)
 	t.details = NewServerDetails()
 	t.statusBar = NewStatusBar()
 
@@ -151,4 +159,16 @@ func (t *tui) updateListTitle() {
 	if t.serverList != nil {
 		t.serverList.SetTitle(" Servers — Sort: " + t.sortMode.String() + " ")
 	}
+}
+
+// handleMarkClear clears mark state if any marks exist. Returns true if marks were cleared.
+func (t *tui) handleMarkClear() bool {
+	if t.markSource != nil || t.markTarget != nil {
+		t.markSource = nil
+		t.markTarget = nil
+		t.refreshServerList()
+		t.showStatusTemp("Marks cleared")
+		return true
+	}
+	return false
 }

@@ -108,6 +108,9 @@ func (t *tui) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	case 't':
 		t.handleTagsEdit()
 		return nil
+	case 'T':
+		t.handleServerMark()
+		return nil
 	case 'f':
 		t.handlePortForward()
 		return nil
@@ -143,6 +146,54 @@ func (t *tui) handleServerPin() {
 		_ = t.serverService.SetPinned(server.Alias, pinned)
 		t.refreshServerList()
 	}
+}
+
+// handleServerMark implements the T key marking state machine.
+// State transitions: idle -> source_marked -> (auto) open browser -> idle
+// Per D-01: uses 'T' (Shift+t), 't' (lowercase) occupied by handleTagsEdit.
+// Per D-04: prevents marking the same server twice.
+// Per D-05: auto-opens dual remote browser when both marks set.
+func (t *tui) handleServerMark() {
+	server, ok := t.serverList.GetSelectedServer()
+	if !ok {
+		return
+	}
+
+	if t.markSource == nil {
+		// First mark: set as source
+		t.markSource = &server
+		t.refreshServerList()
+		t.showStatusTemp("Source marked: " + server.Alias + " — Press T on target server")
+		return
+	}
+
+	if t.markSource.Alias == server.Alias {
+		// Per D-04: same server error
+		t.showStatusTempColor("Cannot mark same server twice", "#FF6B6B")
+		return
+	}
+
+	// Second mark: set as target, then auto-open browser
+	t.markTarget = &server
+	source := *t.markSource
+	target := server
+
+	// Per D-05: clear marks before opening browser
+	t.markSource = nil
+	t.markTarget = nil
+	t.refreshServerList()
+	t.showStatusTemp("Opening dual remote browser...")
+	t.handleDualRemoteBrowser(source, target)
+}
+
+// handleDualRemoteBrowser opens the dual remote file browser for cross-server transfer.
+// TODO: Phase 12 — implement DualRemoteFileBrowser component and wire it here.
+func (t *tui) handleDualRemoteBrowser(source, target domain.Server) {
+	// TODO(Phase 12): Create DualRemoteFileBrowser with source and target SFTP connections.
+	t.showStatusTempColor(
+		fmt.Sprintf("Dual remote: %s <-> %s (not yet implemented)", source.Alias, target.Alias),
+		"#5FAFFF",
+	)
 }
 
 func (t *tui) handleSortToggle() {

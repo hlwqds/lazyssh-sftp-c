@@ -81,8 +81,18 @@ func pinnedIcon(pinnedAt time.Time) string {
 	return "📌" // pinned
 }
 
-func formatServerLine(s domain.Server) (primary, secondary string) {
+func formatServerLine(s domain.Server, markSource, markTarget *domain.Server) (primary, secondary string) {
 	icon := cellPad(pinnedIcon(s.PinnedAt), 2)
+
+	// Mark prefix for T key marking
+	markPrefix := ""
+	switch {
+	case markSource != nil && s.Alias == markSource.Alias:
+		markPrefix = "[#A0FFA0][S][-] "
+	case markTarget != nil && s.Alias == markTarget.Alias:
+		markPrefix = "[#5FAFFF][T][-] "
+	}
+
 	// forwarding column after Host/IP
 	fGlyph := ""
 	isFwd := IsForwarding != nil && IsForwarding(s.Alias)
@@ -94,7 +104,7 @@ func formatServerLine(s domain.Server) (primary, secondary string) {
 		fCol = "[#A0FFA0]" + fCol + "[-]"
 	}
 	// Use a consistent color for alias; host/IP fixed width; then forwarding column
-	primary = fmt.Sprintf("%s [white::b]%-12s[-] [#AAAAAA]%-18s[-] %s [#888888]Last SSH: %s[-]  %s", icon, s.Alias, s.Host, fCol, humanizeDuration(s.LastSeen), renderTagBadgesForList(s.Tags))
+	primary = fmt.Sprintf("%s%s [white::b]%-12s[-] [#AAAAAA]%-18s[-] %s [#888888]Last SSH: %s[-]  %s", markPrefix, icon, s.Alias, s.Host, fCol, humanizeDuration(s.LastSeen), renderTagBadgesForList(s.Tags))
 	secondary = ""
 	return
 }

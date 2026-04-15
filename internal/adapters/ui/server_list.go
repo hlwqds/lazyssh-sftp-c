@@ -20,12 +20,17 @@ import (
 	"github.com/rivo/tview"
 )
 
+// MarkStateGetter returns the current mark source and target servers (nil if unmarked).
+type MarkStateGetter func() (*domain.Server, *domain.Server)
+
 type ServerList struct {
 	*tview.List
 	servers           []domain.Server
 	onSelection       func(domain.Server)
 	onSelectionChange func(domain.Server)
 	onReturnToSearch  func()
+	markStateGetter   MarkStateGetter
+	markClearer       func() bool
 }
 
 func NewServerList() *ServerList {
@@ -58,6 +63,9 @@ func (sl *ServerList) build() {
 		//nolint:exhaustive // We only handle specific keys and pass through others
 		switch event.Key() {
 		case tcell.KeyLeft, tcell.KeyRight, tcell.KeyBackspace, tcell.KeyBackspace2, tcell.KeyESC:
+			if sl.markClearer != nil && sl.markClearer() {
+				return nil // marks cleared, consume Esc
+			}
 			if sl.onReturnToSearch != nil {
 				sl.onReturnToSearch()
 			}
@@ -71,8 +79,13 @@ func (sl *ServerList) UpdateServers(servers []domain.Server) {
 	sl.servers = servers
 	sl.List.Clear()
 
+	var markSource, markTarget *domain.Server
+	if sl.markStateGetter != nil {
+		markSource, markTarget = sl.markStateGetter()
+	}
+
 	for i := range servers {
-		primary, secondary := formatServerLine(servers[i])
+		primary, secondary := formatServerLine(servers[i], markSource, markTarget)
 		idx := i
 		sl.List.AddItem(primary, secondary, 0, func() {
 			if sl.onSelection != nil {
@@ -109,5 +122,15 @@ func (sl *ServerList) OnSelectionChange(fn func(server domain.Server)) *ServerLi
 
 func (sl *ServerList) OnReturnToSearch(fn func()) *ServerList {
 	sl.onReturnToSearch = fn
+	return sl
+}
+
+func (sl *ServerList) OnMarkState(fn MarkStateGetter) *ServerList {
+	sl.markStateGetter = fn
+	return sl
+}
+
+func (sl *ServerList) OnMarkClear(fn func() bool) *ServerList {
+	sl.markClearer = fn
 	return sl
 }
