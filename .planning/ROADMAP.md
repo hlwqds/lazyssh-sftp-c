@@ -173,7 +173,10 @@ Plans:
   2. 用户选中另一台服务器后按 T 键，该服务器前显示 [T] 目标端标记，自动打开双远端文件浏览器
   3. 标记状态下按 Esc 清除所有标记，恢复普通选择状态
   4. 用户尝试标记同一服务器两次时，显示错误提示（如 "Cannot mark same server twice"），标记状态不变
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
 **UI hint**: yes
 
 ### Phase 12: Dual Remote Browser
@@ -185,7 +188,10 @@ Plans:
   2. 用户可以 Tab 键在左右面板间切换焦点，上下方向键浏览文件，Enter 进入目录，h 返回上级目录
   3. 同面板内的文件操作（删除 d、重命名 R、新建目录 m）正常工作，操作执行在对应远程服务器上
   4. 按 Esc 或 q 退出浏览器后，两个 SFTP 连接关闭，资源清理完成，返回服务器列表
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
 **UI hint**: yes
 
 ### Phase 13: Cross-Remote Transfer
@@ -198,7 +204,10 @@ Plans:
   3. 传输过程中 TransferModal 显示两阶段进度："Downloading from A..." 完成后重置为 "Uploading to B..."
   4. 传输过程中按 Esc 取消，本地临时文件和目标端部分文件被清理
   5. 目标文件已存在时弹出冲突对话框（覆盖/跳过/重命名），用户选择后继续或中止
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
 **UI hint**: yes
 
 ## Progress
