@@ -255,6 +255,15 @@ func (tm *TransferModal) ResumeProgress() {
 	tm.cancelConfirmed = false
 }
 
+// ResetProgress resets the progress bar and speed samples for phase transitions
+// (e.g., download → upload in remote copy). Keeps mode and visibility intact.
+func (tm *TransferModal) ResetProgress() {
+	tm.bar = NewProgressBar()
+	tm.speedSamples = tm.speedSamples[:0]
+	tm.infoLine = ""
+	tm.etaLine = ""
+}
+
 // InCancelConfirm returns whether the modal is currently showing the cancel confirmation.
 func (tm *TransferModal) InCancelConfirm() bool {
 	return tm.mode == modeCancelConfirm

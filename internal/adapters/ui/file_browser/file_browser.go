@@ -996,6 +996,7 @@ func (fb *FileBrowser) handleRemotePaste(sourcePath, targetPath, targetName stri
 		fb.app.SetFocus(fb.currentPane())
 	})
 	fb.transferModal.ShowCopy(fb.clipboard.FileInfo.Name)
+	fb.app.QueueUpdateDraw(func() {}) // trigger initial draw
 
 	go func() {
 		var err error
@@ -1062,6 +1063,11 @@ func (fb *FileBrowser) remotePasteDir(ctx context.Context, sourcePath, targetPat
 		return dlErr
 	}
 
+	// Reset progress bar and speed samples for upload phase
+	fb.app.QueueUpdateDraw(func() {
+		fb.transferModal.ResetProgress()
+	})
+
 	ulProgress := func(p domain.TransferProgress) {
 		if p.FileName != "" {
 			p.FileName = "Uploading: " + p.FileName
@@ -1089,15 +1095,17 @@ func (fb *FileBrowser) remotePasteDir(ctx context.Context, sourcePath, targetPat
 func (fb *FileBrowser) remotePasteFile(ctx context.Context, sourcePath, targetPath, targetName string, onConflict domain.ConflictHandler) error {
 	var dlDone bool
 	combinedProgress := func(p domain.TransferProgress) {
-		if !dlDone {
-			fb.transferModal.fileLabel = fmt.Sprintf("Downloading: %s", fb.clipboard.FileInfo.Name)
-		} else {
-			fb.transferModal.fileLabel = fmt.Sprintf("Uploading: %s", targetName)
-		}
-		if p.Done {
+		if p.Done && !dlDone {
 			dlDone = true
+			fb.app.QueueUpdateDraw(func() {
+				fb.transferModal.ResetProgress()
+				fb.transferModal.fileLabel = fmt.Sprintf("Uploading: %s", targetName)
+			})
+			return
 		}
+		label := fmt.Sprintf("Downloading: %s", fb.clipboard.FileInfo.Name)
 		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.fileLabel = label
 			fb.transferModal.Update(p)
 		})
 	}
