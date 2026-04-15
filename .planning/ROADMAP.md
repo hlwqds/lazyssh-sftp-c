@@ -176,7 +176,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
+- [x] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
 **UI hint**: yes
 
 ### Phase 12: Dual Remote Browser
@@ -227,6 +227,6 @@ Phases execute in numeric order: 10 -> 11 -> 12 -> 13
 | 8. Move & Integration | v1.2 | 2/2 | Complete | 2026-04-15 |
 | 9. Dup SSH Connection | v1.3 | 1/1 | Complete | 2026-04-15 |
 | 10. Dup Fix | v1.4 | 1/1 | Complete    | 2026-04-15 |
-| 11. T Key Marking | v1.4 | 0/? | Not started | - |
+| 11. T Key Marking | v1.4 | 1/1 | Complete   | 2026-04-15 |
 | 12. Dual Remote Browser | v1.4 | 0/? | Not started | - |
 | 13. Cross-Remote Transfer | v1.4 | 0/? | Not started | - |

@@ -12,11 +12,11 @@
 
 ### T Key Marking
 
-- [ ] **MARK-01**: 用户可以在服务器列表按 T 键标记第一个服务器为源端（Shift+t，不与小写 t 标签编辑冲突）
-- [ ] **MARK-02**: 再按 T 键标记第二个服务器为目标端，标记完成后自动打开双远端文件浏览器
-- [ ] **MARK-03**: 标记状态下按 Esc 清除所有标记，恢复普通选择状态
-- [ ] **MARK-04**: 防止标记同一服务器两次（显示错误提示或忽略）
-- [ ] **MARK-05**: 已标记的服务器在列表中有视觉提示（如 [S] 源端、[T] 目标端前缀）
+- [x] **MARK-01**: 用户可以在服务器列表按 T 键标记第一个服务器为源端（Shift+t，不与小写 t 标签编辑冲突）
+- [x] **MARK-02**: 再按 T 键标记第二个服务器为目标端，标记完成后自动打开双远端文件浏览器
+- [x] **MARK-03**: 标记状态下按 Esc 清除所有标记，恢复普通选择状态
+- [x] **MARK-04**: 防止标记同一服务器两次（显示错误提示或忽略）
+- [x] **MARK-05**: 已标记的服务器在列表中有视觉提示（如 [S] 源端、[T] 目标端前缀）
 
 ### Dual Remote Browser
 
@@ -52,11 +52,11 @@
 |-------------|-------|--------|
 | DUP-FIX-01 | Phase 10 | Complete |
 | DUP-FIX-02 | Phase 10 | Complete |
-| MARK-01 | Phase 11 | Pending |
-| MARK-02 | Phase 11 | Pending |
-| MARK-03 | Phase 11 | Pending |
-| MARK-04 | Phase 11 | Pending |
-| MARK-05 | Phase 11 | Pending |
+| MARK-01 | Phase 11 | Complete |
+| MARK-02 | Phase 11 | Complete |
+| MARK-03 | Phase 11 | Complete |
+| MARK-04 | Phase 11 | Complete |
+| MARK-05 | Phase 11 | Complete |
 | DRB-01 | Phase 12 | Pending |
 | DRB-02 | Phase 12 | Pending |
 | DRB-03 | Phase 12 | Pending |
