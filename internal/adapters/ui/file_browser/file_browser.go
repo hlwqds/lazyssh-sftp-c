@@ -958,21 +958,20 @@ func (fb *FileBrowser) handleMove() {
 	fb.updateStatusBarTemp(fmt.Sprintf("[#FF6B6B]Move: %s[-]", fi.Name)) // D-06, UI-SPEC red
 }
 
-// handlePaste handles the 'p' key: paste copied file to current directory (CPY-02).
-// Local paste: goroutine + QueueUpdateDraw (instant).
-// Remote paste: TransferModal in modeCopy for progress display (D-08).
+// handlePaste handles the 'p' key: paste copied/moved file to current directory (CPY-02, MOV-02).
+// All logic runs in a goroutine for buildConflictHandler channel sync (D-09).
+// Dispatches by clipboard.Operation: OpCopy -> existing paste handlers, OpMove -> move handlers.
+// Conflict dialog shown for ALL paste operations when target exists (D-01).
 func (fb *FileBrowser) handlePaste() {
-	// Guard: empty clipboard (D-05: silent, no feedback)
+	// Guard: empty clipboard (D-07: silent)
 	if !fb.clipboard.Active {
 		return
 	}
-
-	// Guard: cross-pane paste not supported (D-04, v1.3+)
+	// Guard: cross-pane paste not supported (v1.3+)
 	if fb.clipboard.SourcePane != fb.activePane {
 		fb.showStatusError("Cross-pane paste not supported (v1.3+)")
 		return
 	}
-
 	// Remote pane connection check
 	if fb.activePane == 1 && !fb.remotePane.IsConnected() {
 		fb.showStatusError("Not connected to remote")
@@ -981,47 +980,263 @@ func (fb *FileBrowser) handlePaste() {
 
 	currentPath := fb.getCurrentPanePath()
 	sourcePath := fb.buildPath(fb.clipboard.SourcePane, fb.clipboard.SourceDir, fb.clipboard.FileInfo.Name)
-
-	// Same-directory check: auto-rename to avoid overwrite (D-06)
 	targetName := fb.clipboard.FileInfo.Name
-	if currentPath == fb.clipboard.SourceDir {
+	targetPath := fb.buildPath(fb.activePane, currentPath, targetName)
+
+	// All logic in goroutine for buildConflictHandler channel sync (D-09)
+	go func() {
+		// Conflict check for ALL paste operations (D-01)
 		var statFunc func(string) (os.FileInfo, error)
 		if fb.activePane == 0 {
 			statFunc = fb.fileService.Stat
 		} else {
 			statFunc = fb.sftpService.Stat
 		}
-		targetPath := fb.buildPath(fb.activePane, currentPath, targetName)
-		renamedPath := nextAvailableName(targetPath, statFunc)
-		targetName = filepath.Base(renamedPath)
-	}
-	targetPath := fb.buildPath(fb.activePane, currentPath, targetName)
+		if _, err := statFunc(targetPath); err == nil {
+			// Target exists -- show conflict dialog
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			onConflict := fb.buildConflictHandler(ctx)
+			action, newPath := onConflict(targetName)
+			switch action {
+			case domain.ConflictSkip:
+				return // user chose to skip
+			case domain.ConflictRename:
+				targetName = filepath.Base(newPath)
+				targetPath = fb.buildPath(fb.activePane, currentPath, targetName)
+			case domain.ConflictOverwrite:
+				// continue with original targetPath
+			}
+		}
 
-	if fb.activePane == 0 {
-		fb.handleLocalPaste(sourcePath, targetPath, targetName)
-	} else {
-		fb.handleRemotePaste(sourcePath, targetPath, targetName)
-	}
+		// Operation dispatch (D-07)
+		if fb.clipboard.Operation == OpMove {
+			if currentPath == fb.clipboard.SourceDir {
+				// Same-directory move optimization: use Rename (atomic) per RESEARCH Pitfall 2
+				fb.handleSameDirMove(sourcePath, targetPath, targetName)
+			} else if fb.activePane == 0 {
+				fb.handleLocalMove(sourcePath, targetPath, targetName)
+			} else {
+				fb.handleRemoteMove(sourcePath, targetPath, targetName)
+			}
+		} else {
+			// OpCopy -- existing behavior
+			if fb.activePane == 0 {
+				fb.handleLocalPaste(sourcePath, targetPath, targetName)
+			} else {
+				fb.handleRemotePaste(sourcePath, targetPath, targetName)
+			}
+		}
+	}()
 }
 
-// handleLocalPaste performs a local file copy in a goroutine (CPY-02).
+// handleLocalPaste performs a local file copy (CPY-02).
+// Called from handlePaste's goroutine, so no additional goroutine needed.
 func (fb *FileBrowser) handleLocalPaste(sourcePath, targetPath, targetName string) {
-	go func() {
-		var err error
-		if fb.clipboard.FileInfo.IsDir {
-			err = fb.fileService.CopyDir(sourcePath, targetPath)
-		} else {
-			err = fb.fileService.Copy(sourcePath, targetPath)
+	var err error
+	if fb.clipboard.FileInfo.IsDir {
+		err = fb.fileService.CopyDir(sourcePath, targetPath)
+	} else {
+		err = fb.fileService.Copy(sourcePath, targetPath)
+	}
+	fb.app.QueueUpdateDraw(func() {
+		if err != nil {
+			fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
+			return // D-07: do NOT clear clipboard on failure
 		}
+		fb.clipboard = Clipboard{} // D-07: clear on success
+		fb.refreshPane(fb.activePane)
+		fb.focusOnItem(fb.activePane, targetName)
+		fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
+	})
+}
+
+// handleSameDirMove moves a file within the same directory using Rename (atomic operation).
+// This is more efficient than Copy+Delete and avoids partial failure states (RESEARCH Pitfall 2).
+func (fb *FileBrowser) handleSameDirMove(sourcePath, targetPath, targetName string) {
+	var err error
+	if fb.activePane == 0 {
+		err = fb.fileService.Rename(sourcePath, targetPath)
+	} else {
+		err = fb.sftpService.Rename(sourcePath, targetPath)
+	}
+	fb.app.QueueUpdateDraw(func() {
+		if err != nil {
+			fb.showStatusError(fmt.Sprintf("Move failed: %s", trimError(err.Error(), 50)))
+			return // D-07: do NOT clear clipboard on failure
+		}
+		fb.clipboard = Clipboard{} // D-07: clear on success
+		fb.refreshPane(fb.activePane)
+		fb.focusOnItem(fb.activePane, targetName)
+		fb.updateStatusBarTemp(fmt.Sprintf("[#FF6B6B]Moved: %s[-]", targetName))
+	})
+}
+
+// handleLocalMove moves a file across directories via Copy + Delete source (D-03).
+// On delete failure: attempts cleanup of target copy (D-04).
+func (fb *FileBrowser) handleLocalMove(sourcePath, targetPath, targetName string) {
+	var err error
+	if fb.clipboard.FileInfo.IsDir {
+		err = fb.fileService.CopyDir(sourcePath, targetPath)
+	} else {
+		err = fb.fileService.Copy(sourcePath, targetPath)
+	}
+	if err != nil {
 		fb.app.QueueUpdateDraw(func() {
-			if err != nil {
-				fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
-				return // D-05: do NOT clear clipboard on failure
+			fb.showStatusError(fmt.Sprintf("Move failed: %s", trimError(err.Error(), 50)))
+			// D-04: source preserved on copy failure, clipboard NOT cleared
+		})
+		return
+	}
+	// Copy succeeded -- delete source
+	if fb.clipboard.FileInfo.IsDir {
+		err = fb.fileService.RemoveAll(sourcePath)
+	} else {
+		err = fb.fileService.Remove(sourcePath)
+	}
+	fb.app.QueueUpdateDraw(func() {
+		if err != nil {
+			// D-04: copy succeeded but delete failed -- attempt cleanup target
+			fb.log.Errorw("move: failed to delete source, attempting cleanup",
+				"source", sourcePath, "target", targetPath, "error", err)
+			var cleanupErr error
+			if fb.clipboard.FileInfo.IsDir {
+				cleanupErr = fb.fileService.RemoveAll(targetPath)
+			} else {
+				cleanupErr = fb.fileService.Remove(targetPath)
 			}
-			fb.clipboard = Clipboard{} // D-05: clear on success
+			if cleanupErr != nil {
+				fb.log.Warnw("move: cleanup also failed", "target", targetPath, "error", cleanupErr)
+				fb.showStatusError("Move failed: source kept, target copy may need manual cleanup")
+			} else {
+				fb.showStatusError("Move failed: source kept, target cleaned up")
+			}
+			return // D-07: do NOT clear clipboard on failure
+		}
+		fb.clipboard = Clipboard{} // D-07: clear on success
+		fb.refreshPane(fb.activePane)
+		fb.focusOnItem(fb.activePane, targetName)
+		fb.updateStatusBarTemp(fmt.Sprintf("[#FF6B6B]Moved: %s[-]", targetName))
+	})
+}
+
+// handleRemoteMove performs a remote file move via CopyRemoteFile/CopyRemoteDir + SFTP Remove (D-03, D-04).
+// Phase 1: Copy (modeMove progress). Phase 2: Delete source ("Deleting source..." text).
+// On Phase 2 failure: attempt cleanup of target copy (D-04).
+func (fb *FileBrowser) handleRemoteMove(sourcePath, targetPath, targetName string) {
+	fb.transferring = true
+	ctx, cancel := context.WithCancel(context.Background())
+	fb.transferCancel = cancel
+
+	fb.transferModal.SetDismissCallback(func() {
+		if fb.transferModal.IsCanceled() {
+			if fb.transferCancel != nil {
+				fb.transferCancel()
+			}
+			return
+		}
+		fb.transferring = false
+		fb.app.SetRoot(fb, true)
+		fb.app.SetFocus(fb.currentPane())
+	})
+	fb.transferModal.ShowMove(fb.clipboard.FileInfo.Name)
+	fb.app.QueueUpdateDraw(func() {})
+
+	go func() {
+		// Phase 1: Copy remote source to target
+		onConflict := fb.buildConflictHandler(ctx)
+		var copyErr error
+
+		if fb.clipboard.FileInfo.IsDir {
+			dlProgress := func(p domain.TransferProgress) {
+				if p.FileName != "" {
+					p.FileName = "Downloading: " + p.FileName
+				}
+				fb.app.QueueUpdateDraw(func() {
+					fb.transferModal.fileLabel = p.FileName
+					fb.transferModal.Update(p)
+				})
+			}
+			ulProgress := func(p domain.TransferProgress) {
+				if p.FileName != "" {
+					p.FileName = "Uploading: " + p.FileName
+				}
+				fb.app.QueueUpdateDraw(func() {
+					fb.transferModal.fileLabel = p.FileName
+					fb.transferModal.Update(p)
+				})
+			}
+			_, copyErr = fb.transferSvc.CopyRemoteDir(ctx, sourcePath, targetPath, dlProgress, ulProgress, onConflict)
+		} else {
+			moveProgress := func(p domain.TransferProgress) {
+				label := p.FileName
+				if p.Done {
+					label = "Uploading: " + label
+				} else {
+					label = "Downloading: " + label
+				}
+				fb.app.QueueUpdateDraw(func() {
+					fb.transferModal.fileLabel = label
+					fb.transferModal.Update(p)
+				})
+			}
+			copyErr = fb.transferSvc.CopyRemoteFile(ctx, sourcePath, targetPath, moveProgress, onConflict)
+		}
+
+		if copyErr != nil {
+			// Copy failed -- source preserved (D-04: MOV-03 satisfied)
+			fb.app.QueueUpdateDraw(func() {
+				fb.showStatusError(fmt.Sprintf("Move failed: %s", trimError(copyErr.Error(), 50)))
+				fb.transferring = false
+				fb.transferModal.Hide()
+				// D-07: do NOT clear clipboard on failure
+			})
+			return
+		}
+
+		// Phase 2: Delete source (D-08: show "Deleting source...")
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.fileLabel = "Deleting source..."
+			fb.transferModal.infoLine = ""
+			fb.transferModal.etaLine = ""
+		})
+
+		var removeErr error
+		if fb.clipboard.FileInfo.IsDir {
+			removeErr = fb.sftpService.RemoveAll(sourcePath)
+		} else {
+			removeErr = fb.sftpService.Remove(sourcePath)
+		}
+
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferCancel = nil
+			if removeErr != nil {
+				// D-04: Copy succeeded but delete failed -- try cleanup target
+				fb.log.Errorw("move: failed to delete source, attempting cleanup",
+					"source", sourcePath, "error", removeErr)
+				var cleanupErr error
+				if fb.clipboard.FileInfo.IsDir {
+					cleanupErr = fb.sftpService.RemoveAll(targetPath)
+				} else {
+					cleanupErr = fb.sftpService.Remove(targetPath)
+				}
+				if cleanupErr != nil {
+					fb.log.Warnw("move: cleanup also failed", "target", targetPath, "error", cleanupErr)
+					fb.showStatusError("Move failed: source kept, target copy may need manual cleanup")
+				} else {
+					fb.showStatusError("Move failed: source kept, target cleaned up")
+				}
+				fb.transferring = false
+				fb.transferModal.Hide()
+				return // D-07: do NOT clear clipboard on failure
+			}
+			// Success
+			fb.transferModal.Hide()
+			fb.transferring = false
+			fb.clipboard = Clipboard{} // D-07: clear on success
 			fb.refreshPane(fb.activePane)
 			fb.focusOnItem(fb.activePane, targetName)
-			fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
+			fb.updateStatusBarTemp(fmt.Sprintf("[#FF6B6B]Moved: %s[-]", targetName))
 		})
 	}()
 }
