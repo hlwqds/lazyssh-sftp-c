@@ -430,6 +430,95 @@ func (ts *transferService) downloadSingleFile(ctx context.Context, remotePath, l
 	return nil
 }
 
+// CopyRemoteFile copies a file within the remote filesystem by downloading to a
+// temporary local file and re-uploading to the destination path (D-01).
+// Temp file is cleaned up via defer regardless of success or failure.
+func (ts *transferService) CopyRemoteFile(
+	ctx context.Context,
+	remoteSrc, remoteDst string,
+	onProgress func(domain.TransferProgress),
+	onConflict domain.ConflictHandler,
+) error {
+	// Create temp file for intermediate storage
+	tmpFile, err := os.CreateTemp("", "lazyssh-copy-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close() // DownloadFile will create its own handle
+	defer os.Remove(tmpPath) // always clean up temp (Pitfall 3)
+
+	// Phase 1: Download remote source to temp
+	dlProgress := func(p domain.TransferProgress) {
+		if onProgress != nil {
+			onProgress(p)
+		}
+	}
+	if err := ts.DownloadFile(ctx, remoteSrc, tmpPath, dlProgress, nil); err != nil {
+		return fmt.Errorf("download for copy: %w", err)
+	}
+
+	// Phase 2: Upload temp to remote destination
+	ulProgress := func(p domain.TransferProgress) {
+		if onProgress != nil {
+			onProgress(p)
+		}
+	}
+	if err := ts.UploadFile(ctx, tmpPath, remoteDst, ulProgress, onConflict); err != nil {
+		return fmt.Errorf("upload for copy: %w", err)
+	}
+
+	return nil
+}
+
+// CopyRemoteDir copies a directory within the remote filesystem by downloading
+// to a temporary local directory and re-uploading to the destination path (D-01).
+func (ts *transferService) CopyRemoteDir(
+	ctx context.Context,
+	remoteSrc, remoteDst string,
+	onProgress func(domain.TransferProgress),
+	onConflict domain.ConflictHandler,
+) ([]string, error) {
+	// Create temp directory for intermediate storage
+	tmpDir, err := os.MkdirTemp("", "lazyssh-copydir-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir) // always clean up (Pitfall 3)
+
+	// Extract directory name for temp sub-path
+	srcBase := filepath.Base(remoteSrc)
+	tmpBase := filepath.Join(tmpDir, srcBase)
+
+	// Phase 1: Download remote directory to temp
+	dlProgress := func(p domain.TransferProgress) {
+		if onProgress != nil {
+			onProgress(p)
+		}
+	}
+	dlFailed, err := ts.DownloadDir(ctx, remoteSrc, tmpBase, dlProgress, nil)
+	if err != nil {
+		return dlFailed, fmt.Errorf("download dir for copy: %w", err)
+	}
+
+	// Phase 2: Upload temp directory to remote destination
+	ulProgress := func(p domain.TransferProgress) {
+		if onProgress != nil {
+			onProgress(p)
+		}
+	}
+	ulFailed, err := ts.UploadDir(ctx, tmpBase, remoteDst, ulProgress, onConflict)
+	if err != nil {
+		// Combine failed files from both phases
+		allFailed := append(dlFailed, ulFailed...)
+		return allFailed, fmt.Errorf("upload dir for copy: %w", err)
+	}
+
+	// Combine any failed files from both phases
+	allFailed := append(dlFailed, ulFailed...)
+	return allFailed, nil
+}
+
 // copyWithProgress copies data from src to dst using a 32KB buffer,
 // calling onProgress after each chunk. Checks ctx.Done() before each
 // Read to support cancellation with at most 32KB delay.

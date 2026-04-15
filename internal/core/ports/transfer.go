@@ -48,4 +48,15 @@ type TransferService interface {
 	// onConflict is called for each conflicting file.
 	// Returns list of failed file paths (empty = all success).
 	DownloadDir(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
+
+	// CopyRemoteFile copies a file within the remote filesystem via download+re-upload (D-01).
+	// Downloads remoteSrc to a temp file, then uploads to remoteDst.
+	// onProgress reports progress for both phases.
+	// onConflict handles conflicts during upload phase (download phase never conflicts).
+	CopyRemoteFile(ctx context.Context, remoteSrc, remoteDst string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error
+
+	// CopyRemoteDir copies a directory within the remote filesystem via download+re-upload (D-01).
+	// Downloads remoteSrc directory to a temp directory, then uploads to remoteDst.
+	// Returns list of failed file paths.
+	CopyRemoteDir(ctx context.Context, remoteSrc, remoteDst string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
 }

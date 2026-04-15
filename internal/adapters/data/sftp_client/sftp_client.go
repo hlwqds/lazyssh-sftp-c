@@ -15,6 +15,7 @@
 package sftp_client
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,6 +30,10 @@ import (
 	"github.com/pkg/sftp"
 	"go.uber.org/zap"
 )
+
+// errRemoteCopyNotSupported indicates that the SFTP protocol does not support
+// server-side copy operations. Use TransferService.CopyRemoteFile/CopyRemoteDir instead.
+var errRemoteCopyNotSupported = errors.New("remote copy not supported by SFTP protocol; use TransferService.CopyRemoteFile or CopyRemoteDir")
 
 // SFTPClient implements ports.SFTPService using system SSH binary via pkg/sftp NewClientPipe.
 // This approach reuses the user's SSH configuration (keys, agents, known_hosts)
@@ -386,6 +391,18 @@ func sftpSortSlice(entries []domain.FileInfo, sortField domain.FileSortField, so
 		}
 		return !less
 	})
+}
+
+// Copy copies a single file within the remote filesystem.
+// The SFTP protocol does not support server-side copy; use TransferService.CopyRemoteFile instead.
+func (c *SFTPClient) Copy(_ string, _ string) error {
+	return errRemoteCopyNotSupported
+}
+
+// CopyDir copies a directory within the remote filesystem.
+// The SFTP protocol does not support server-side copy; use TransferService.CopyRemoteDir instead.
+func (c *SFTPClient) CopyDir(_ string, _ string) error {
+	return errRemoteCopyNotSupported
 }
 
 // Compile-time interface satisfaction check.
