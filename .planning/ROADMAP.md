@@ -117,7 +117,7 @@ Plans:
 
 Plans:
 - [x] 07-01-PLAN.md -- FileService/TransferService port 扩展 + LocalFS/transfer adapter 实现
-- [ ] 07-02-PLAN.md -- Clipboard UI：handleCopy/handlePaste + [C] 前缀 + TransferModal modeCopy + Esc 清除
+- [x] 07-02-PLAN.md -- Clipboard UI：handleCopy/handlePaste + [C] 前缀 + TransferModal modeCopy + Esc 清除
 
 ### Phase 8: Move & Integration
 **Goal**: 用户可以通过 x 标记 + p 粘贴在面板内移动文件/目录，移动失败时保留源文件
