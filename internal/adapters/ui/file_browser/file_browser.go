@@ -1148,25 +1148,19 @@ func (fb *FileBrowser) handleRemoteMove(sourcePath, targetPath, targetName strin
 		var copyErr error
 
 		if fb.clipboard.FileInfo.IsDir {
-			dlProgress := func(p domain.TransferProgress) {
-				if p.FileName != "" {
-					p.FileName = "Downloading: " + p.FileName
+			moveProgress := func(p domain.TransferProgress) {
+				label := p.FileName
+				if p.Done {
+					label = "Uploading: " + label
+				} else {
+					label = "Downloading: " + label
 				}
 				fb.app.QueueUpdateDraw(func() {
-					fb.transferModal.fileLabel = p.FileName
+					fb.transferModal.fileLabel = label
 					fb.transferModal.Update(p)
 				})
 			}
-			ulProgress := func(p domain.TransferProgress) {
-				if p.FileName != "" {
-					p.FileName = "Uploading: " + p.FileName
-				}
-				fb.app.QueueUpdateDraw(func() {
-					fb.transferModal.fileLabel = p.FileName
-					fb.transferModal.Update(p)
-				})
-			}
-			_, copyErr = fb.transferSvc.CopyRemoteDir(ctx, sourcePath, targetPath, dlProgress, ulProgress, onConflict)
+			_, copyErr = fb.transferSvc.CopyRemoteDir(ctx, sourcePath, targetPath, moveProgress, onConflict)
 		} else {
 			moveProgress := func(p domain.TransferProgress) {
 				label := p.FileName
