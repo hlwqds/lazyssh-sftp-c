@@ -618,13 +618,346 @@ func (fb *FileBrowser) showStatusError(msg string) {
 }
 
 // handleDelete handles the 'd' key: delete selected file(s) or directory.
-// Stub -- full implementation in Task 2.
-func (fb *FileBrowser) handleDelete() {}
+// For multi-select (Space): shows batch delete confirmation with count and total size.
+// For single selection: shows file details (name, size, type, modified time).
+// For directories: shows recursive warning in detail line.
+// Uses goroutine + QueueUpdateDraw to avoid blocking UI (Pitfall 2).
+func (fb *FileBrowser) handleDelete() {
+	paneIdx, fs := fb.activePane, fb.getFileService()
+
+	// Remote pane connection check
+	if paneIdx == 1 && !fb.remotePane.IsConnected() {
+		fb.showStatusError("Not connected to remote")
+		return
+	}
+
+	// Check for multi-select
+	selectedFiles := fb.getSelectedFiles(paneIdx)
+	if len(selectedFiles) > 0 {
+		fb.handleBatchDelete(paneIdx, fs, selectedFiles)
+		return
+	}
+
+	// Single selection: get current FileInfo
+	row, _ := fb.getActiveSelection()
+	cell := fb.getActiveCell(row, 0)
+	if cell == nil {
+		return
+	}
+	fi, ok := cell.GetReference().(domain.FileInfo)
+	if !ok {
+		return
+	}
+
+	currentPath := fb.getCurrentPanePath()
+	fullPath := fb.buildPath(paneIdx, currentPath, fi.Name)
+
+	// Build confirmation message (D-03: file name, size, type, modified time)
+	fileType := "Directory"
+	if !fi.IsDir {
+		fileType = "File"
+	}
+	sizeStr := "-"
+	if !fi.IsDir {
+		sizeStr = formatSize(fi.Size)
+	}
+	message := fmt.Sprintf("%s  (%s, %s, %s)", fi.Name, sizeStr, fileType, fi.ModTime.Format("2006-01-02 15:04"))
+
+	detail := ""
+	if fi.IsDir {
+		detail = "Directory not empty, all contents will be deleted"
+	}
+
+	fb.confirmDialog.SetOnConfirm(func() {
+		go func() {
+			var err error
+			if fi.IsDir {
+				err = fs.RemoveAll(fullPath)
+			} else {
+				err = fs.Remove(fullPath)
+			}
+			fb.app.QueueUpdateDraw(func() {
+				if err != nil {
+					fb.showStatusError(fmt.Sprintf("Delete failed: %s", trimError(err.Error(), 50)))
+					return
+				}
+				fb.refreshAndReposition(paneIdx, row)
+			})
+		}()
+	})
+
+	fb.confirmDialog.SetOnCancel(nil)
+	fb.confirmDialog.Show("Delete?", message, detail)
+}
+
+// handleBatchDelete handles deletion of multiple space-selected files.
+// Shows count and total size summary, then deletes sequentially in a goroutine.
+func (fb *FileBrowser) handleBatchDelete(paneIdx int, fs ports.FileService, files []domain.FileInfo) {
+	currentPath := fb.getCurrentPanePath()
+
+	// Calculate total size (skip directories, per Research open question 3)
+	var totalSize int64
+	for _, fi := range files {
+		if !fi.IsDir {
+			totalSize += fi.Size
+		}
+	}
+
+	message := fmt.Sprintf("Delete %d items? Total size: %s", len(files), formatSize(totalSize))
+
+	fb.confirmDialog.SetOnConfirm(func() {
+		go func() {
+			var firstErr error
+			for _, fi := range files {
+				fullPath := fb.buildPath(paneIdx, currentPath, fi.Name)
+				var err error
+				if fi.IsDir {
+					err = fs.RemoveAll(fullPath)
+				} else {
+					err = fs.Remove(fullPath)
+				}
+				if err != nil && firstErr == nil {
+					firstErr = err
+					fb.log.Errorw("batch delete failed", "file", fi.Name, "error", err)
+				}
+			}
+			fb.app.QueueUpdateDraw(func() {
+				fb.refreshPane(paneIdx)
+				if firstErr != nil {
+					fb.showStatusError(fmt.Sprintf("Delete failed: %s", trimError(firstErr.Error(), 50)))
+				}
+			})
+		}()
+	})
+
+	fb.confirmDialog.SetOnCancel(nil)
+	fb.confirmDialog.Show("Delete Multiple?", message, "")
+}
 
 // handleRename handles the 'R' key: rename selected file/directory.
-// Stub -- full implementation in Task 2.
-func (fb *FileBrowser) handleRename() {}
+// Shows InputDialog pre-filled with current name. Checks for name conflicts
+// and prompts with ConfirmDialog if target already exists (REN-02).
+func (fb *FileBrowser) handleRename() {
+	paneIdx, fs := fb.activePane, fb.getFileService()
 
-// handleMkdir handles the 'm' key: create new directory.
-// Stub -- full implementation in Task 2.
-func (fb *FileBrowser) handleMkdir() {}
+	// Remote pane connection check
+	if paneIdx == 1 && !fb.remotePane.IsConnected() {
+		fb.showStatusError("Not connected to remote")
+		return
+	}
+
+	row, _ := fb.getActiveSelection()
+	cell := fb.getActiveCell(row, 0)
+	if cell == nil {
+		return
+	}
+	fi, ok := cell.GetReference().(domain.FileInfo)
+	if !ok {
+		return
+	}
+
+	currentPath := fb.getCurrentPanePath()
+	oldFullPath := fb.buildPath(paneIdx, currentPath, fi.Name)
+
+	fb.inputDialog.SetOnSubmit(func(newName string) {
+		// Empty check (defensive, InputDialog already guards)
+		if newName == "" {
+			return
+		}
+		// No change check
+		if newName == fi.Name {
+			return
+		}
+
+		newFullPath := fb.buildPath(paneIdx, currentPath, newName)
+
+		// Check for name conflict (REN-02)
+		if _, err := fs.Stat(newFullPath); err == nil {
+			// Target exists -- show confirm dialog for overwrite
+			fb.confirmDialog.SetOnConfirm(func() {
+				go func() {
+					err := fs.Rename(oldFullPath, newFullPath)
+					fb.app.QueueUpdateDraw(func() {
+						if err != nil {
+							fb.showStatusError(fmt.Sprintf("Rename failed: %s", trimError(err.Error(), 50)))
+							return
+						}
+						fb.refreshPane(paneIdx)
+						fb.focusOnItem(paneIdx, newName)
+					})
+				}()
+			})
+			fb.confirmDialog.SetOnCancel(nil)
+			fb.confirmDialog.Show("Name Conflict", fmt.Sprintf("'%s' already exists. Overwrite?", newName), "")
+			return
+		}
+
+		// No conflict -- rename directly
+		go func() {
+			err := fs.Rename(oldFullPath, newFullPath)
+			fb.app.QueueUpdateDraw(func() {
+				if err != nil {
+					fb.showStatusError(fmt.Sprintf("Rename failed: %s", trimError(err.Error(), 50)))
+					return
+				}
+				fb.refreshPane(paneIdx)
+				fb.focusOnItem(paneIdx, newName)
+			})
+		}()
+	})
+
+	fb.inputDialog.SetOnCancel(nil)
+	fb.inputDialog.Show("Rename", "New name: ", fi.Name)
+}
+
+// handleMkdir handles the 'm' key: create new directory in current path.
+// Shows InputDialog with empty input. After creation, positions cursor on new directory (MKD-02).
+func (fb *FileBrowser) handleMkdir() {
+	paneIdx, fs := fb.activePane, fb.getFileService()
+
+	// Remote pane connection check
+	if paneIdx == 1 && !fb.remotePane.IsConnected() {
+		fb.showStatusError("Not connected to remote")
+		return
+	}
+
+	currentPath := fb.getCurrentPanePath()
+
+	fb.inputDialog.SetOnSubmit(func(dirName string) {
+		if dirName == "" {
+			return
+		}
+
+		fullPath := fb.buildPath(paneIdx, currentPath, dirName)
+
+		go func() {
+			err := fs.Mkdir(fullPath)
+			fb.app.QueueUpdateDraw(func() {
+				if err != nil {
+					fb.showStatusError(fmt.Sprintf("Mkdir failed: %s", trimError(err.Error(), 50)))
+					return
+				}
+				fb.refreshPane(paneIdx)
+				fb.focusOnItem(paneIdx, dirName)
+			})
+		}()
+	})
+
+	fb.inputDialog.SetOnCancel(nil)
+	fb.inputDialog.Show("New Directory", "Directory name: ", "")
+}
+
+// getFileService returns the appropriate FileService for the active pane.
+func (fb *FileBrowser) getFileService() ports.FileService {
+	if fb.activePane == 0 {
+		return fb.fileService
+	}
+	return fb.sftpService
+}
+
+// getActiveSelection returns the row and column of the current selection in the active pane.
+func (fb *FileBrowser) getActiveSelection() (int, int) {
+	if fb.activePane == 0 {
+		return fb.localPane.GetSelection()
+	}
+	return fb.remotePane.GetSelection()
+}
+
+// getActiveCell returns the TableCell at the given row and column in the active pane.
+func (fb *FileBrowser) getActiveCell(row, col int) *tview.TableCell {
+	if fb.activePane == 0 {
+		return fb.localPane.GetCell(row, col)
+	}
+	return fb.remotePane.GetCell(row, col)
+}
+
+// getCurrentPanePath returns the current directory path of the active pane.
+func (fb *FileBrowser) getCurrentPanePath() string {
+	if fb.activePane == 0 {
+		return fb.localPane.GetCurrentPath()
+	}
+	return fb.remotePane.GetCurrentPath()
+}
+
+// getSelectedFiles returns all space-selected files in the given pane.
+func (fb *FileBrowser) getSelectedFiles(paneIdx int) []domain.FileInfo {
+	if paneIdx == 0 {
+		return fb.localPane.SelectedFiles()
+	}
+	return fb.remotePane.SelectedFiles()
+}
+
+// buildPath constructs a full path for the given pane index.
+func (fb *FileBrowser) buildPath(paneIdx int, base, name string) string {
+	if paneIdx == 0 {
+		return filepath.Join(base, name)
+	}
+	return joinPath(base, name)
+}
+
+// refreshPane refreshes the file listing in the given pane.
+func (fb *FileBrowser) refreshPane(paneIdx int) {
+	if paneIdx == 0 {
+		fb.localPane.Refresh()
+	} else {
+		fb.remotePane.Refresh()
+	}
+}
+
+// refreshAndReposition refreshes the listing and positions the cursor at the given row.
+// Clamps the row to the valid range [1, totalRows-1] (DEL-04).
+func (fb *FileBrowser) refreshAndReposition(paneIdx int, deletedRow int) {
+	fb.refreshPane(paneIdx)
+	// After refresh, clamp the selection to a valid row
+	targetRow := deletedRow
+	if targetRow < 1 {
+		targetRow = 1
+	}
+	if paneIdx == 0 {
+		rowCount := fb.localPane.GetRowCount()
+		if targetRow >= rowCount {
+			targetRow = rowCount - 1
+		}
+		if targetRow < 1 {
+			targetRow = 1
+		}
+		fb.localPane.Select(targetRow, 0)
+	} else {
+		rowCount := fb.remotePane.GetRowCount()
+		if targetRow >= rowCount {
+			targetRow = rowCount - 1
+		}
+		if targetRow < 1 {
+			targetRow = 1
+		}
+		fb.remotePane.Select(targetRow, 0)
+	}
+}
+
+// focusOnItem finds a file by name in the given pane and selects it.
+// Used after rename and mkdir to position cursor on the new/renamed item (MKD-02).
+func (fb *FileBrowser) focusOnItem(paneIdx int, name string) {
+	var table *tview.Table
+	if paneIdx == 0 {
+		table = fb.localPane.Table
+	} else {
+		table = fb.remotePane.Table
+	}
+
+	rows := table.GetRowCount()
+	for row := 1; row < rows; row++ {
+		cell := table.GetCell(row, 0)
+		if cell == nil {
+			continue
+		}
+		ref := cell.GetReference()
+		if ref == nil {
+			continue
+		}
+		fi, ok := ref.(domain.FileInfo)
+		if ok && fi.Name == name {
+			table.Select(row, 0)
+			return
+		}
+	}
+}
