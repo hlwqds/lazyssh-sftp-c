@@ -171,3 +171,34 @@ func TestBuildSSHCommand_CompleteCommand(t *testing.T) {
 		t.Errorf("Command should contain 'admin@example.com', got: %q", result)
 	}
 }
+
+func TestFormatServerLine_MarkPrefix(t *testing.T) {
+	server := domain.Server{Alias: "testserver", Host: "example.com"}
+
+	// No marks
+	p, _ := formatServerLine(server, nil, nil)
+	if strings.Contains(p, "[S]") || strings.Contains(p, "[T]") {
+		t.Error("no marks should produce no prefix")
+	}
+
+	// Source mark
+	src := domain.Server{Alias: "testserver"}
+	p, _ = formatServerLine(server, &src, nil)
+	if !strings.Contains(p, "[#A0FFA0][S][-]") {
+		t.Errorf("source mark should produce [S] prefix, got: %s", p)
+	}
+
+	// Target mark
+	tgt := domain.Server{Alias: "testserver"}
+	p, _ = formatServerLine(server, nil, &tgt)
+	if !strings.Contains(p, "[#5FAFFF][T][-]") {
+		t.Errorf("target mark should produce [T] prefix, got: %s", p)
+	}
+
+	// Wrong alias — no prefix
+	other := domain.Server{Alias: "other"}
+	p, _ = formatServerLine(server, &other, nil)
+	if strings.Contains(p, "[S]") {
+		t.Error("non-matching alias should not produce prefix")
+	}
+}
