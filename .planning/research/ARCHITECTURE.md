@@ -1,617 +1,707 @@
-# Architecture Research: v1.3 Enhanced File Browser
+# Architecture Research: v1.4 Dual-Remote File Transfer
 
-**Domain:** TUI Enhanced File Browser -- Local Path Persistence, Dup SSH, Dual-Remote Transfer
+**Domain:** TUI SSH Manager -- Dual-Remote File Transfer
 **Researched:** 2026-04-15
-**Confidence:** HIGH (based on direct code analysis of all relevant files in internal/core/ports, internal/core/services, internal/adapters/data, internal/adapters/ui/file_browser, and cmd/main.go)
+**Overall confidence:** HIGH (based on direct code analysis of all relevant files: ports, adapters, UI components, transfer service, SFTP client)
 
 ## Executive Summary
 
-v1.3 adds three features that touch every architectural layer. (1) Local path history persistence extends the existing `RecentDirs` pattern to the local pane, requiring a new port interface and adapter for JSON persistence in `~/.lazyssh/`. (2) Dup SSH is purely a server-list-level feature that reuses existing `ServerService.AddServer()` -- it requires zero port/adapter changes, only a new handler in the TUI layer. (3) Dual-remote file transfer is the most architecturally significant feature: it requires a new `RelayTransferService` that orchestrates two SFTP connections, a new `DualRemoteFileBrowser` UI component (or mode-switch on existing FileBrowser), and a modified transfer modal for 3-phase staged progress (download from A, upload to B, cleanup).
+v1.4 的双远端文件互传需要在服务器列表层添加 T 键标记机制，然后打开一个全新的 `DualRemoteFileBrowser` 组件，左右两栏各连接一台远端服务器。传输通过本地中转实现：从源服务器下载到临时文件/目录，再上传到目标服务器。这个方案复用了现有 `CopyRemoteFile`/`CopyRemoteDir` 的两阶段模式（download-to-temp + re-upload），但不复用现有 `TransferService`，因为它硬编码了单个 `SFTPService` 引用。
 
-The critical architectural insight is that features (1) and (2) are simple extensions of existing patterns, while feature (3) introduces a fundamentally new component -- a second SFTP connection managed concurrently. The existing `TransferService` is hardcoded to a single SFTP connection (`ts.sftp`). Dual-remote requires either a new service that accepts two SFTP connections or a factory-based approach to create TransferService instances per-connection.
+核心架构决策：(1) T 键标记状态存储在 TUI 层（非 `ServerList`），因为需要跨组件访问；(2) `DualRemoteFileBrowser` 是独立于 `FileBrowser` 的新组件，避免条件分支污染；(3) `RelayTransferService` 是新端口+适配器，内部持有两个 `SFTPService` 引用；(4) 进度显示复用 `TransferModal`，通过新的 `ShowRelay()` 方法初始化，两阶段各显示一次进度条（与 `CopyRemoteFile` 现有行为一致）。
 
-## Feature 1: Local Path History Persistence
+## 1. T 键标记机制：服务器列表集成
 
-### Problem
+### 1.1 标记状态存储
 
-Currently, `RecentDirs` (v1.1) persists remote directory paths to `~/.lazyssh/recent-dirs/{user@host}.json`. The local pane has no path history -- users must manually navigate to upload/download directories each time.
-
-### Architecture: Port + Adapter + UI Hook
-
-#### Port Interface: PathHistoryService
+标记状态必须存储在 TUI struct 上，而非 `ServerList` 组件内部。原因：`ServerList` 是纯展示组件（`tview.List`），不应持有应用级交互状态。T 键处理逻辑在 `handleGlobalKeys` 中（`handlers.go`），而打开 `DualRemoteFileBrowser` 的逻辑也在 `handlers.go`，两者需要共享标记数据。
 
 ```go
-// internal/core/ports/path_history.go
+// internal/adapters/ui/tui.go -- 新增字段
 
-// PathHistoryService manages MRU path history for local file browser panes.
-type PathHistoryService interface {
-    // Record adds a path to the MRU list. Deduplicates and truncates to maxEntries.
-    Record(path string)
-    // GetPaths returns the MRU list (most recent first).
-    GetPaths() []string
-    // Clear removes all persisted paths.
-    Clear()
+type tui struct {
+    // ...existing fields...
+
+    // Dual-remote transfer marking state
+    markedServers   [2]domain.Server  // [0]=source, [1]=target
+    markedCount     int               // 0, 1, or 2
+    markRenderDirty bool              // triggers list re-render to show [T1]/[T2] prefixes
 }
 ```
 
-**Why a separate port instead of extending RecentDirs:**
-- `RecentDirs` is a UI component (embeds `*tview.Box`, has `Draw()`, `HandleKey()`). Ports should be pure interfaces.
-- `RecentDirs` is per-server (keyed by `user@host`). Local path history is global (not per-remote-server).
-- Separation of concerns: persistence logic belongs in adapters, UI rendering belongs in the UI layer.
+**为什么用固定大小数组 `[2]domain.Server` 而非 `[]domain.Server`：**
+- 最多标记 2 台服务器，数组大小固定，无需动态分配
+- 索引语义清晰：`markedServers[0]` 是源端，`markedServers[1]` 是目标端
+- 避免 slice 越界检查
 
-#### Adapter: LocalPathHistory
-
-```go
-// internal/adapters/data/local_path_history/local_path_history.go
-
-type localPathHistory struct {
-    filePath string // ~/.lazyssh/local-path-history.json
-    paths    []string
-    maxEntries int  // 20 (more than remote's 10 since local paths vary more)
-    mu       sync.RWMutex
-    log      *zap.SugaredLogger
-}
-```
-
-**Storage format:** Same as `RecentDirs` -- `[]string` JSON at `~/.lazyssh/local-path-history.json`. Maximum 20 entries (vs 10 for remote dirs, since local paths span more contexts).
-
-**Why reuse the JSON `[]string` format:**
-- Already proven by RecentDirs
-- Simple, human-readable, no schema migration needed
-- Error-tolerant (RecentDirs logs errors but never fails the caller)
-
-#### UI Integration: Extend LocalPane
-
-The local pane needs the same `r` key behavior as the remote pane, but with a separate `LocalRecentDirs` overlay instance.
+### 1.2 T 键处理流程
 
 ```
-LocalRecentDirs (new struct, mirrors RecentDirs pattern)
-  ├── *tview.Box
-  ├── paths []string
-  ├── visible bool
-  ├── selectedIndex int
-  ├── onSelect func(path string)
-  └── currentPath string
+case 'T':
+    handleMarkForDualRemote()
+
+handleMarkForDualRemote():
+  1. 获取当前选中服务器
+  2. 如果该服务器已被标记 -> 取消标记（toggle），重置该位置
+  3. 如果 markedCount < 2:
+     - 将服务器存入 markedServers[markedCount]
+     - markedCount++
+  4. 标记完成后的 UI 反馈：
+     - markedCount == 1: 状态栏显示 "[#A0FFA0]Marked 1/2: source = alias@host[-]"
+     - markedCount == 2: 状态栏显示 "[#A0FFA0]Marked 2/2. Press T again to transfer, or Esc to clear.[-]"
+  5. 如果 markedCount == 2 且用户再次按 T -> 打开 DualRemoteFileBrowser
 ```
 
-**Key routing change in `handleGlobalKeys`:**
+**替代方案（被否决）：**
+- 按 T 后弹出选择面板让用户指定"源端/目标端"：增加交互步骤，T 键标记两次更简洁
+- 按一次 T 打开 browser，再选第二台服务器：需要在 browser 内嵌 server picker，复杂度高
+
+### 1.3 Esc 清除标记
+
 ```
-case 'r':
-    if fb.activePane == 0 {
-        // Local pane: show LocalRecentDirs
-        fb.localRecentDirs.SetCurrentPath(fb.localPane.GetCurrentPath())
-        fb.localRecentDirs.Show()
-    } else if fb.activePane == 1 && fb.remotePane.IsConnected() {
-        // Remote pane: show RecentDirs (existing)
-        fb.recentDirs.SetCurrentPath(fb.remotePane.GetCurrentPath())
-        fb.recentDirs.Show()
+case tcell.KeyESC:
+    if t.markedCount > 0 {
+        t.markedCount = 0
+        t.markedServers = [2]domain.Server{}
+        t.markRenderDirty = true
+        t.showStatusTemp("Marks cleared")
+        return nil
     }
+    // 原有 ESC 行为...
 ```
 
-**Recording hook:** After successful upload/download, record the local path:
-```go
-// In initiateTransfer() after success:
-fb.localRecentDirs.Record(fb.localPane.GetCurrentPath())
-```
+### 1.4 服务器列表标记可视化
 
-**Why NOT unify LocalRecentDirs and RecentDirs into one component:**
-- Different data sources (PathHistoryService vs RecentDirs' internal persistence)
-- Different MRU limits (20 vs 10)
-- Different title text ("Recent Local Directories" vs "Recent Directories")
-- The cost of a separate ~100-line struct is negligible vs the coupling cost of unification
+需要在服务器列表项上显示标记前缀，类似现有剪贴板的 `[C]`/`[M]` 前缀。
 
-### Modified vs New Files
-
-| File | Change | Lines (est.) |
-|------|--------|-------------|
-| `internal/core/ports/path_history.go` | New port interface | ~15 |
-| `internal/adapters/data/local_path_history/local_path_history.go` | New adapter | ~100 |
-| `internal/adapters/ui/file_browser/local_recent_dirs.go` | New overlay component | ~150 |
-| `internal/adapters/ui/file_browser/file_browser.go` | Add localRecentDirs field, wire in build() | +15 |
-| `internal/adapters/ui/file_browser/file_browser_handlers.go` | Extend 'r' key to local pane | +5 |
-| `internal/adapters/ui/file_browser/file_browser.go` | Record local path after transfer | +3 |
-| `internal/adapters/ui/file_browser/file_browser.go` | Draw chain: add localRecentDirs overlay | +3 |
-| `cmd/main.go` | Create LocalPathHistory, pass to TUI/NewFileBrowser | +3 |
-
-### Dependency: None (independent feature)
-
----
-
-## Feature 2: Dup SSH Connection
-
-### Problem
-
-Users want to create a new server entry based on an existing one (e.g., same host, different port, or same config with minor tweaks). Currently requires manually entering all fields via `a` (add).
-
-### Architecture: Pure TUI Handler, Zero Port Changes
-
-The entire feature lives in the TUI layer. It reuses existing `ServerService.AddServer()` which already handles alias conflict detection, SSH config writing, and metadata creation.
-
-#### Key Binding: `D` (Shift+d) in Server List
-
-The `d` key is already taken (server delete). Use `D` (uppercase) for dup, following the same pattern as `s`/`S` (sort/sort-reverse).
-
-```
-case 'D':
-    t.handleServerDup()
-    return nil
-```
-
-#### Handler Flow
-
-```
-handleServerDup():
-  1. Get selected server from serverList
-  2. Copy server entity: dupServer = server
-  3. Generate unique alias: dupServer.Alias = server.Alias + "-copy"
-     - If "server-copy" exists, try "server-copy-2", "server-copy-3", etc.
-  4. Clear non-copyable fields:
-     - Tags: [] (new server starts without tags)
-     - LastSeen, PinnedAt: zero values (fresh metadata)
-     - SSHCount: 0
-  5. Open ServerForm in ADD mode with dupServer pre-filled
-  6. User edits and saves via existing handleServerSave()
-```
-
-**Why pre-fill into ServerForm (add mode) instead of directly adding:**
-- User must see and confirm the new alias before it's written
-- User may want to change other fields (port, user, identity file)
-- Reuses existing validation (alias format, host format, duplicate check)
-- Reuses existing save path (AddServer -> SSH config write + metadata)
-
-**Alias generation strategy:**
-```
-base = server.Alias + "-copy"
-if exists(base) -> base = server.Alias + "-copy-2"
-if exists(base) -> base = server.Alias + "-copy-3"
-...
-up to 100 attempts, then fall back to server.Alias + "-copy-" + timestamp
-```
-
-**Implementation location:** `handleServerDup()` in `internal/adapters/ui/handlers.go`.
-
-### Modified vs New Files
-
-| File | Change | Lines (est.) |
-|------|--------|-------------|
-| `internal/adapters/ui/handlers.go` | Add handleServerDup(), 'D' key binding | +50 |
-
-### Dependency: None (independent feature, simplest of the three)
-
----
-
-## Feature 3: Dual-Remote File Transfer
-
-### Problem
-
-Transfer files between two different remote servers. The local machine acts as a relay because direct server-to-server SFTP is not possible (SFTP protocol requires a client connection, and lazyssh uses system ssh binary, not a Go SSH library that could multiplex).
-
-### Architecture: New Component, New Service, Modified Transfer Modal
-
-This is the most architecturally complex feature. Three sub-problems:
-
-1. **Server selection UI**: How does the user pick two servers?
-2. **Connection management**: How to manage two concurrent SFTP connections?
-3. **Relay transfer logic**: How to orchestrate download-from-A + upload-to-B?
-4. **Staged progress display**: How to show 3-phase progress?
-
-#### Sub-problem 1: Server Selection UI
-
-**Option A: New `DualRemoteFileBrowser` component (Recommended)**
-
-Create a new top-level component that wraps two RemotePanes and a TransferModal. Entry from the server list via a new key (e.g., `M` for "Move between remotes").
-
-```
-DualRemoteFileBrowser (new root, *tview.Flex)
-  ├── leftRemotePane  (*RemotePane, connected to Server A)
-  ├── rightRemotePane (*RemotePane, connected to Server B)
-  ├── statusBar       (*tview.TextView)
-  ├── transferModal   (*TransferModal, overlay)
-  └── confirmDialog   (*ConfirmDialog, overlay)
-```
-
-**Why a new component instead of mode-switching on FileBrowser:**
-- FileBrowser has a hard dependency on one SFTP connection (fb.sftpService)
-- Dual-remote needs two independent SFTP connections with independent connection lifecycle
-- The pane type is different (both RemotePane, not LocalPane + RemotePane)
-- Mode-switching would require conditional logic throughout FileBrowser (if dualRemote then... else...)
-- A separate component keeps each mode's complexity isolated
-
-**Server selection flow:**
-```
-User presses 'M' on server list
-  -> If no server selected: show error
-  -> Selected server = Server A (left pane)
-  -> Show server picker overlay (reuse ServerList as a selection popup)
-  -> User picks Server B (right pane)
-  -> Create DualRemoteFileBrowser(leftServer, rightServer)
-  -> app.SetRoot(dualBrowser, true)
-```
-
-**Server picker overlay:**
-```
-ServerPickerOverlay (new struct, follows overlay pattern)
-  ├── *tview.Box
-  ├── servers []domain.Server
-  ├── visible bool
-  ├── selectedIndex int
-  ├── onSelect func(domain.Server)
-  └── filter string
-```
-
-**Why not use tview.Form with DropDown:**
-- Server list can be long (50+ servers)
-- Need filtering/search capability
-- Need keyboard navigation (j/k)
-- DropDown in tview doesn't support filtering
-
-#### Sub-problem 2: Connection Management
-
-**The core problem:** `TransferService` holds a single `ports.SFTPService` reference. For dual-remote, we need two independent SFTP connections.
-
-**Option A: Create two SFTPClient instances (Recommended)**
+**实现位置：** `formatServerLine()` 函数（`handlers.go` 中），根据 `t.markedServers` 检查当前服务器是否被标记。
 
 ```go
-// In DualRemoteFileBrowser
-sftpA := sftp_client.New(log)  // connects to Server A
-sftpB := sftp_client.New(log)  // connects to Server B
-
-sftpA.Connect(serverA)
-sftpB.Connect(serverB)
-```
-
-**Option B: SFTPClient factory**
-Create a factory that produces SFTPClient instances. Over-engineering for this use case -- we only ever need 2.
-
-**Option C: Modify TransferService to accept two SFTP connections**
-Violates single responsibility. TransferService should remain focused on local<->remote transfers.
-
-**Recommended approach: New `RelayTransferService`**
-
-```go
-// internal/core/ports/relay_transfer.go
-
-// RelayTransferService transfers files between two remote servers via local relay.
-// The local machine downloads from sourceServer, then uploads to targetServer.
-type RelayTransferService interface {
-    // RelayFile downloads a file from source, uploads to target.
-    RelayFile(ctx context.Context, srcPath string, dstPath string,
-        onProgress func(domain.TransferProgress),
-        onConflict domain.ConflictHandler) error
-
-    // RelayDir downloads a directory from source, uploads to target.
-    // Returns list of failed file paths.
-    RelayDir(ctx context.Context, srcPath string, dstPath string,
-        onProgress func(domain.TransferProgress),
-        onConflict domain.ConflictHandler) ([]string, error)
+func formatServerLine(server domain.Server, markLabel string) (string, string) {
+    // 现有格式化逻辑
+    if markLabel != "" {
+        primary = fmt.Sprintf("[%s] %s", markLabel, primary)
+    }
+    return primary, secondary
 }
 ```
 
-```go
-// internal/adapters/data/transfer/relay_transfer_service.go
+`UpdateServers()` 调用时需要传入标记信息。但 `ServerList.UpdateServers()` 只接受 `[]domain.Server`，不携带标记状态。
 
-type relayTransferService struct {
-    log        *zap.SugaredLogger
-    srcSFTP    ports.SFTPService  // download source
-    dstSFTP    ports.SFTPService  // upload target
-    srcLabel   string             // "user@host" for progress display
-    dstLabel   string             // "user@host" for progress display
+**解决方案：** 在 `tui` 层处理标记渲染，通过修改 `UpdateServers` 调用前后的处理逻辑：
+
+方案 A（推荐）：在 `refreshServerList()` 中，对已标记的服务器修改 `primary` 文本前缀。
+
+```go
+func (t *tui) refreshServerList() {
+    // ...existing logic...
+    t.serverList.UpdateServers(filtered) // 先正常更新
+    // 再更新标记前缀
+    t.serverList.UpdateMarkLabels(t.markedServers[:t.markedCount])
 }
 ```
 
-**Why a separate service instead of reusing TransferService:**
-- TransferService is hardcoded to one SFTP + local filesystem. Relay needs two SFTP connections.
-- Relay has different progress semantics (3 phases: download, upload, cleanup)
-- Relay has no local filesystem involvement (temp files only, managed internally)
-- Interface Segregation: callers of TransferService don't need relay methods
+方案 B：将标记状态传入 `ServerList`，让它内部渲染前缀。但这需要修改 `ServerList` 的 API。
 
-**Implementation strategy for RelayFile:**
+**推荐方案 A**，因为 `ServerList` 保持纯展示职责，标记状态属于 TUI 层。
 
-```
-Phase 1: Download from sourceSFTP to temp file
-  - srcSFTP.OpenRemoteFile(srcPath)
-  - os.CreateTemp("", "lazyssh-relay-*")
-  - copyWithProgress (32KB buffer, same pattern as transfer_service.go)
-  - Progress label: "Downloading from {srcLabel}: filename"
+### 1.5 涉及文件
 
-Phase 2: Upload temp file to targetSFTP
-  - dstSFTP.CreateRemoteFile(dstPath)
-  - copyWithProgress
-  - Progress label: "Uploading to {dstLabel}: filename"
+| 文件 | 变更 | 估计行数 |
+|------|------|---------|
+| `internal/adapters/ui/tui.go` | 新增 `markedServers`, `markedCount`, `markRenderDirty` 字段 | +5 |
+| `internal/adapters/ui/handlers.go` | 新增 `handleMarkForDualRemote()`，`T` 键绑定，Esc 清除标记 | +60 |
+| `internal/adapters/ui/server_list.go` | 新增 `UpdateMarkLabels()` 方法，支持行前缀更新 | +30 |
 
-Phase 3: Cleanup
-  - os.Remove(tempPath)
-  - Report summary
-```
+## 2. DualRemoteFileBrowser：新组件架构
 
-**Implementation strategy for RelayDir:**
-```
-Phase 1: Download entire directory from sourceSFTP to temp dir
-  - srcSFTP.WalkDir(srcPath) to get file list
-  - For each file: download to temp/{relativePath}
-  - Progress: "Phase 1/2: Downloading from {srcLabel} (3/20 files)"
+### 2.1 为什么是独立组件而非 FileBrowser 的模式切换
 
-Phase 2: Upload temp directory to targetSFTP
-  - filepath.WalkDir(tempDir) to enumerate downloaded files
-  - For each file: upload to dstPath/{relativePath}
-  - Progress: "Phase 2/2: Uploading to {dstLabel} (3/20 files)"
+现有 `FileBrowser` 有以下硬编码假设，无法通过模式切换干净地适配双远端：
 
-Phase 3: Cleanup
-  - os.RemoveAll(tempDir)
-  - Report summary
-```
+1. **Pane 类型硬编码：** `localPane *LocalPane` + `remotePane *RemotePane`（file_browser.go:69-70）。双远端需要两个 `*RemotePane`。
+2. **单 SFTP 连接：** `sftpService ports.SFTPService`（file_browser.go:66）。双远端需要两个独立连接。
+3. **TransferService 绑定：** `transferSvc ports.TransferService`（file_browser.go:67），其内部持有单个 `SFTPService`。双远端需要不同的传输服务。
+4. **Pane 索引语义：** `activePane == 0` 表示本地，`activePane == 1` 表示远程（贯穿所有 handler）。双远端中两个 pane 都是远程，索引语义不同。
+5. **Clipboard 跨 pane 限制：** `handlePaste()` 明确拒绝跨 pane 粘贴（file_browser.go:971-973）。双远端的核心功能就是跨 pane 传输。
+6. **RecentDirs 绑定单服务器：** `NewRecentDirs(fb.log, fb.server.Host, fb.server.User)`（file_browser.go:139）。双远端需要两个 RecentDirs 实例。
 
-**Why not stream directly from source to target (pipe without temp file):**
-- SFTP OpenRemoteFile returns `io.ReadCloser`, SFTP CreateRemoteFile returns `io.WriteCloser`
-- Technically we could do `io.Copy(sftpB.Create(), sftpA.Open())`
-- BUT: This provides no progress tracking (no total size for download phase)
-- AND: If upload fails mid-way, we can't retry without re-downloading
-- AND: The temp file approach matches the proven CopyRemoteFile pattern already in TransferService
-- The disk space trade-off is acceptable: temp files are deleted immediately after upload
+**结论：** 如果强行在 FileBrowser 中添加 `isDualRemote bool` 标志，几乎每个方法都需要 `if isDualRemote { ... } else { ... }` 分支。独立组件将复杂度隔离在单一文件中。
 
-#### Sub-problem 3: Staged Progress Display
+### 2.2 组件结构
 
-**Extend TransferModal with a new mode: `modeRelay`**
+```go
+// internal/adapters/ui/file_browser/dual_remote_browser.go
 
-```
-TransferModal modes (extended):
-  modeProgress       -- single file local<->remote
-  modeCancelConfirm  -- cancel confirmation
-  modeConflictDialog -- conflict resolution
-  modeSummary        -- transfer complete
-  modeCopy           -- remote copy (download+re-upload)
-  modeMove           -- remote move (download+re-upload+delete)
-  modeRelay          -- DUAL-REMOTE: 3-phase staged progress  ← NEW
+type DualRemoteFileBrowser struct {
+    *tview.Flex                          // root layout
+    app            *tview.Application
+    log            *zap.SugaredLogger
+    sftpA          *sftp_client.SFTPClient  // Server A 连接
+    sftpB          *sftp_client.SFTPClient  // Server B 连接
+    relaySvc       *relay_transfer.RelayTransferService  // 中转传输服务
+    leftPane       *RemotePane             // 连接到 sftpA (Server A)
+    rightPane      *RemotePane             // 连接到 sftpB (Server B)
+    statusBar      *tview.TextView
+    transferModal  *TransferModal
+    confirmDialog  *ConfirmDialog
+    serverA        domain.Server
+    serverB        domain.Server
+    activePane     int                     // 0=left, 1=right
+    transferring   bool
+    transferCancel context.CancelFunc
+    onClose        func()
+}
 ```
 
-**Relay progress layout:**
-```
-┌─────────────────────────────────────────────┐
-│         Relay Transfer: file.txt            │
-│                                             │
-│  Phase 1/2: Downloading from user@host-a    │
-│  ████████████████████░░░░░░  67%  2.3 MB/s  │
-│  ETA: 0m 12s                                │
-│                                             │
-│  Source: user@host-a:/path/to/file.txt       │
-│  Target: user@host-b:/path/to/file.txt       │
-│                                             │
-│  [Esc] Cancel                               │
-└─────────────────────────────────────────────┘
-```
+### 2.3 构造函数与连接生命周期
 
-**Phase transition:**
-```
-Phase 1 progress bar fills to 100%
-  -> Progress bar resets
-  -> Phase label changes: "Phase 2/2: Uploading to user@host-b"
-  -> Speed samples reset (new connection, different throughput)
-```
-
-**Key decision: Reset progress bar between phases or show overall?**
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| **Reset per phase** (Recommended) | Clear feedback for each phase; speed is accurate per connection; matches CopyRemoteFile UI pattern | User can't see overall progress |
-| Overall (phase1_bytes + phase2_bytes / total) | Shows overall completion | Misleading speed (averages two different connections); total bytes only known after download completes |
-
-**Recommendation:** Reset per phase. Show "Phase 1/2" and "Phase 2/2" labels. This matches how `CopyRemoteFile` already works (download progress then upload progress).
-
-#### Sub-problem 4: DualRemoteFileBrowser Component Design
-
-```
-DualRemoteFileBrowser (new root, *tview.Flex)
-  ├── *tview.Flex (root layout)
-  ├── app *tview.Application
-  ├── log *zap.SugaredLogger
-  ├── sftpA, sftpB *sftp_client.SFTPClient
-  ├── leftPane *RemotePane  (connected to sftpA)
-  ├── rightPane *RemotePane (connected to sftpB)
-  ├── statusBar *tview.TextView
-  ├── transferModal *TransferModal
-  ├── confirmDialog *ConfirmDialog
-  ├── serverA, serverB domain.Server
-  ├── activePane int  // 0=left, 1=right
-  ├── transferring bool
-  ├── transferCancel context.CancelFunc
-  └── onClose func()
-```
-
-**Key differences from FileBrowser:**
-- No LocalPane (both panes are RemotePane)
-- Two independent SFTP connections (not one)
-- Uses RelayTransferService instead of TransferService
-- No RecentDirs (remote dirs differ per server, would need per-server MRU -- deferred to future)
-- No clipboard copy/move (cross-server copy is the relay transfer itself)
-
-**Constructor:**
 ```go
 func NewDualRemoteFileBrowser(
     app *tview.Application,
     log *zap.SugaredLogger,
     serverA, serverB domain.Server,
-    relaySvc ports.RelayTransferService,
     onClose func(),
-) *DualRemoteFileBrowser
-```
-
-**Key routing (simplified):**
-```
-DualRemoteFileBrowser.handleGlobalKeys(event):
-  1. Overlay interception (transferModal, confirmDialog)
-  2. Tab -> switchFocus()
-  3. Esc -> close (cleanup both SFTP connections)
-  4. F5 -> initiateRelayDirTransfer()
-  5. Enter on file -> initiateRelayFileTransfer()
-  6. Pass to focused pane
-```
-
-**Relay transfer initiation:**
-```go
-func (d *DualRemoteFileBrowser) initiateRelayTransfer() {
-    if d.activePane == 0 {
-        // Left -> Right: download from sftpA, upload to sftpB
-        srcPane, dstPane = d.leftPane, d.rightPane
-    } else {
-        // Right -> Left: download from sftpB, upload to sftpA
-        srcPane, dstPane = d.rightPane, d.leftPane
+) *DualRemoteFileBrowser {
+    drfb := &DualRemoteFileBrowser{
+        Flex:     tview.NewFlex(),
+        app:      app,
+        log:      log,
+        serverA:  serverA,
+        serverB:  serverB,
+        onClose:  onClose,
     }
 
-    // Get selected file, determine src/dst paths
-    // Show transferModal in modeRelay
-    // Start goroutine with relaySvc.RelayFile()
+    // 创建两个独立 SFTP 连接
+    drfb.sftpA = sftp_client.New(log)
+    drfb.sftpB = sftp_client.New(log)
+
+    // 创建中转传输服务
+    drfb.relaySvc = relay_transfer.New(log, drfb.sftpA, drfb.sftpB, serverA, serverB)
+
+    drfb.build()
+    return drfb
 }
 ```
 
-**Why Enter triggers relay transfer (not F5):**
-- F5 is for directory transfer (consistent with FileBrowser)
-- Enter on a file in the source pane is the natural trigger
-- The target is always the OTHER pane (no need to select target)
+**连接生命周期（与 FileBrowser.build() 一致的模式）：**
 
-### DI Chain Changes
+```
+build():
+  1. 创建 leftPane = NewRemotePane(log, sftpA, serverA)
+  2. 创建 rightPane = NewRemotePane(log, sftpB, serverB)
+  3. 两个 pane 都显示 "Connecting..." 状态
+  4. 启动两个 goroutine 并行连接：
+     go connectAndShow(sftpA, leftPane, serverA)
+     go connectAndShow(sftpB, rightPane, serverB)
+  5. 每个 goroutine 连接完成后通过 QueueUpdateDraw 更新 pane 状态
+```
+
+**并行连接 vs 串行连接：**
+- 推荐**并行**。两台服务器相互独立，并行连接缩短用户等待时间。
+- 现有 FileBrowser 是串行连接（单个 goroutine），因为只有一个连接。
+- 并行连接没有额外风险：每个 SFTPClient 有独立的 mutex、独立的 ssh 进程。
+
+### 2.4 布局
+
+```
+DualRemoteFileBrowser (*tview.Flex, FlexRow)
+  ├── content (*tview.Flex, FlexColumn)
+  │   ├── leftPane  (*RemotePane) -- 50% width, initially focused
+  │   └── rightPane (*RemotePane) -- 50% width
+  └── statusBar (*tview.TextView) -- 1 row height
+```
+
+布局与 FileBrowser 完全一致（50:50 FlexColumn + 1-row StatusBar），但两个 pane 都是 `*RemotePane`。
+
+### 2.5 键路由
+
+```
+DualRemoteFileBrowser.handleGlobalKeys(event):
+  1. Overlay 拦截（transferModal > confirmDialog）
+  2. Tab -> switchFocus()
+  3. Esc -> close()（关闭两个 SFTP 连接）
+  4. F5 -> initiateRelayDirTransfer()
+  5. Enter on file -> initiateRelayFileTransfer()
+  6. c/x/p -> clipboard (同 pane 内复制/移动/粘贴)
+  7. d/R/m -> delete/rename/mkdir（同 pane 内操作）
+  8. s/S -> sort（作用于当前 pane）
+  9. 传递到 focused pane 的 InputCapture（h/Space/./Backspace/j/k/arrows/Enter）
+```
+
+**关键差异 vs FileBrowser 键路由：**
+- 没有 `r` 键弹出最近目录（双远端中两个 pane 的 RecentDirs 管理更复杂，v1.4 不实现）
+- Enter on file 触发中转传输（而非 ignore，因为双远端没有本地文件"预览"概念）
+- c/x/p 仍支持**同 pane 内**的复制/移动/粘贴（通过 `RelayTransferService` 或 SFTP 原生操作）
+
+### 2.6 close() 方法
 
 ```go
-// cmd/main.go (current)
-sftpService := sftp_client.New(log)
-transferService := transfer.New(log, sftpService)
-
-// cmd/main.go (v1.3) -- no changes needed!
-// DualRemoteFileBrowser creates its own SFTPClient instances internally
-// RelayTransferService is created inside DualRemoteFileBrowser, not in main.go
+func (drfb *DualRemoteFileBrowser) close() {
+    drfb.app.SetAfterDrawFunc(nil)
+    go func() {
+        _ = drfb.sftpA.Close()
+    }()
+    go func() {
+        _ = drfb.sftpB.Close()
+    }()
+    if drfb.onClose != nil {
+        drfb.onClose()
+    }
+}
 ```
 
-**Why RelayTransferService is NOT created in main.go:**
-- It needs two SFTPClient instances that are specific to the chosen server pair
-- The server pair is only known at runtime (user selection in UI)
-- Creating it in main.go would require passing it through the entire TUI -> handler -> component chain
-- Internal creation in DualRemoteFileBrowser keeps the DI chain clean
+两个连接都在 goroutine 中关闭，与 FileBrowser.close() 模式一致（file_browser.go:135-143）。
 
-### Modified vs New Files
+### 2.7 涉及文件
 
-| File | Change | Lines (est.) |
-|------|--------|-------------|
-| `internal/core/ports/relay_transfer.go` | New port interface | ~25 |
-| `internal/adapters/data/transfer/relay_transfer_service.go` | New adapter | ~200 |
-| `internal/adapters/ui/file_browser/dual_remote_browser.go` | New root component | ~300 |
-| `internal/adapters/ui/file_browser/server_picker.go` | New overlay for server selection | ~150 |
-| `internal/adapters/ui/file_browser/transfer_modal.go` | Add modeRelay, ShowRelay(), relay-specific Draw | +80 |
-| `internal/adapters/ui/handlers.go` | Add 'M' key binding, handleDualRemote() | +40 |
+| 文件 | 变更 | 估计行数 |
+|------|------|---------|
+| `internal/adapters/ui/file_browser/dual_remote_browser.go` | 新组件 | ~400 |
+| `internal/adapters/ui/file_browser/dual_remote_handlers.go` | 键路由、传输启动 | ~300 |
 
-### Dependency: None technically, but build after features 1 and 2 because it's the most complex
+## 3. RelayTransferService：中转传输服务
 
----
+### 3.1 端口接口
 
-## Integration Points Summary
+```go
+// internal/core/ports/relay_transfer.go
 
-### Shared Changes Across Features
+// RelayTransferService transfers files between two remote servers via local relay.
+// The local machine downloads from source, then uploads to target.
+// Temp files are managed internally and cleaned up after transfer.
+type RelayTransferService interface {
+    // RelayFile downloads a file from source remote and uploads to target remote.
+    RelayFile(ctx context.Context, srcPath, dstPath string,
+        onProgress func(domain.TransferProgress),
+        onConflict domain.ConflictHandler) error
 
-| Component | Feature 1 (Path History) | Feature 2 (Dup SSH) | Feature 3 (Dual Remote) |
-|-----------|------------------------|--------------------|-----------------------|
-| `internal/core/ports/` | New file: `path_history.go` | No change | New file: `relay_transfer.go` |
-| `internal/adapters/data/` | New package: `local_path_history/` | No change | New file in `transfer/`: `relay_transfer_service.go` |
-| `internal/adapters/ui/file_browser/` | New: `local_recent_dirs.go`, modify `file_browser.go`, `file_browser_handlers.go` | No change | New: `dual_remote_browser.go`, `server_picker.go`, modify `transfer_modal.go` |
-| `internal/adapters/ui/handlers.go` | No change | Add `handleServerDup()`, 'D' key | Add `handleDualRemote()`, 'M' key |
-| `cmd/main.go` | Create PathHistoryService, pass to TUI | No change | No change (internal creation) |
-| Domain layer | No change | No change | No change |
-
-### Build Order
-
-```
-Phase A: Dup SSH (simplest, zero architectural risk)
-  └── internal/adapters/ui/handlers.go  (add 'D' key + handleServerDup)
-
-Phase B: Local Path History (extends existing pattern)
-  ├── internal/core/ports/path_history.go           (new port)
-  ├── internal/adapters/data/local_path_history/     (new adapter)
-  ├── internal/adapters/ui/file_browser/local_recent_dirs.go  (new overlay)
-  └── internal/adapters/ui/file_browser/file_browser*.go      (wire + key routing)
-
-Phase C: Dual-Remote Transfer (most complex, depends on understanding Phase A/B patterns)
-  ├── internal/core/ports/relay_transfer.go           (new port)
-  ├── internal/adapters/data/transfer/relay_transfer_service.go  (new adapter)
-  ├── internal/adapters/ui/file_browser/server_picker.go        (new overlay)
-  ├── internal/adapters/ui/file_browser/dual_remote_browser.go  (new component)
-  └── internal/adapters/ui/file_browser/transfer_modal.go       (add modeRelay)
+    // RelayDir downloads a directory from source remote and uploads to target remote.
+    // Returns list of failed file paths (empty = all success).
+    RelayDir(ctx context.Context, srcPath, dstPath string,
+        onProgress func(domain.TransferProgress),
+        onConflict domain.ConflictHandler) ([]string, error)
+}
 ```
 
-**Phase ordering rationale:**
-- Phase A is trivially simple (~50 lines, one file, zero risk) -- do it first for quick win
-- Phase B extends the RecentDirs pattern (well-understood, medium complexity)
-- Phase C is architecturally novel (new component, new service, new UI mode) -- do it last when patterns from A/B are fresh
+### 3.2 适配器实现
 
-### Updated Component Map (All Features)
+```go
+// internal/adapters/data/transfer/relay_transfer_service.go
+
+type relayTransferService struct {
+    log      *zap.SugaredLogger
+    srcSFTP  ports.SFTPService
+    dstSFTP  ports.SFTPService
+    srcLabel string  // "user@host" for progress display
+    dstLabel string  // "user@host" for progress display
+}
+```
+
+### 3.3 RelayFile 实现策略
+
+直接复用现有 `CopyRemoteFile` 的模式（transfer_service.go:436-472），但使用两个不同的 SFTPService 实例：
 
 ```
-TUI (main view)
-  ├── ServerList
-  │   ├── 'D' -> handleServerDup() [Phase A]
-  │   └── 'M' -> handleDualRemote() [Phase C]
+Phase 1: Download from srcSFTP to temp file
+  - srcSFTP.OpenRemoteFile(srcPath) -> io.ReadCloser
+  - os.CreateTemp("", "lazyssh-relay-*") -> temp file
+  - copyWithProgress(ctx, remoteReader, tempWriter, ..., onProgress)
+  - onProgress label: "Downloading from {srcLabel}: filename"
+
+Phase 2: Upload temp file to dstSFTP
+  - dstSFTP.CreateRemoteFile(dstPath) -> io.WriteCloser
+  - os.Open(tempPath) -> temp file reader
+  - copyWithProgress(ctx, tempReader, remoteWriter, ..., onProgress)
+  - onProgress label: "Uploading to {dstLabel}: filename"
+  - onConflict handler for target file conflicts
+
+Phase 3: Cleanup
+  - os.Remove(tempPath)
+  - defer 确保清理（与 CopyRemoteFile 的 Pitfall 3 模式一致）
+```
+
+**关键实现细节：**
+- 复用 `transfer_service.go` 中的 `copyWithProgress()` 方法。但由于 `relayTransferService` 是独立 struct，需要复制或提取这个方法。
+- **推荐：** 将 `copyWithProgress` 提取为包级函数（`internal/adapters/data/transfer/copy_progress.go`），两个 service 共享。
+- 或者，`relayTransferService` 内部创建两个 `transferService` 实例（一个用 srcSFTP，一个用 dstSFTP），分别调用 `DownloadFile` 和 `UploadFile`。
+
+**方案对比：**
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| 创建两个 transferService 实例 | 零代码重复，完全复用现有逻辑 | 每个实例都持有一个 SFTPService + 文件系统操作，语义上有点奇怪 |
+| 提取 copyWithProgress 为包级函数 | 干净的代码复用 | 需要重构现有代码 |
+| relayTransferService 内部重新实现 | 完全独立，不影响现有代码 | 代码重复（~80行 copyWithProgress） |
+
+**推荐方案 1：创建两个 transferService 实例。**
+
+```go
+func New(log *zap.SugaredLogger, srcSFTP, dstSFTP ports.SFTPService,
+    srcServer, dstServer domain.Server) *relayTransferService {
+    return &relayTransferService{
+        log:      log,
+        srcSFTP:  srcSFTP,
+        dstSFTP:  dstSFTP,
+        srcLabel: fmt.Sprintf("%s@%s", srcServer.User, srcServer.Host),
+        dstLabel: fmt.Sprintf("%s@%s", dstServer.User, dstServer.Host),
+    }
+}
+
+func (rs *relayTransferService) RelayFile(ctx context.Context,
+    srcPath, dstPath string,
+    onProgress func(domain.TransferProgress),
+    onConflict domain.ConflictHandler) error {
+
+    // 创建临时文件
+    tmpFile, err := os.CreateTemp("", "lazyssh-relay-*")
+    tmpPath := tmpFile.Name()
+    _ = tmpFile.Close()
+    defer func() { _ = os.Remove(tmpPath) }()
+
+    // Phase 1: 从源服务器下载到临时文件
+    dlSvc := transfer.New(rs.log, rs.srcSFTP)
+    if err := dlSvc.DownloadFile(ctx, srcPath, tmpPath, onProgress, nil); err != nil {
+        return fmt.Errorf("relay download: %w", err)
+    }
+
+    // Phase 2: 从临时文件上传到目标服务器
+    ulSvc := transfer.New(rs.log, rs.dstSFTP)
+    if err := ulSvc.UploadFile(ctx, tmpPath, dstPath, onProgress, onConflict); err != nil {
+        return fmt.Errorf("relay upload: %w", err)
+    }
+
+    return nil
+}
+```
+
+**这个方案的优雅之处：**
+- `transfer.New(log, sftpService)` 创建的 `transferService` 会自动使用传入的 `SFTPService` 做远端操作、使用 `os.*` 做本地操作
+- 对于 `dlSvc`（下载服务）：`srcSFTP` 扮演远端角色，临时文件扮演本地角色
+- 对于 `ulSvc`（上传服务）：`dstSFTP` 扮演远端角色，临时文件扮演本地角色
+- 零代码重复，完全复用 `DownloadFile` 和 `UploadFile` 的所有逻辑（冲突处理、取消传播、错误清理）
+
+**RelayDir 同理：**
+```go
+func (rs *relayTransferService) RelayDir(ctx context.Context,
+    srcPath, dstPath string,
+    onProgress func(domain.TransferProgress),
+    onConflict domain.ConflictHandler) ([]string, error) {
+
+    tmpDir, err := os.MkdirTemp("", "lazyssh-relaydir-*")
+    defer func() { _ = os.RemoveAll(tmpDir) }()
+
+    srcBase := filepath.Base(srcPath)
+    tmpBase := filepath.Join(tmpDir, srcBase)
+
+    // Phase 1: 从源服务器下载整个目录到临时目录
+    dlSvc := transfer.New(rs.log, rs.srcSFTP)
+    dlFailed, err := dlSvc.DownloadDir(ctx, srcPath, tmpBase, onProgress, nil)
+
+    // Phase 2: 从临时目录上传到目标服务器
+    ulSvc := transfer.New(rs.log, rs.dstSFTP)
+    ulFailed, err := ulSvc.UploadDir(ctx, tmpBase, dstPath, onProgress, onConflict)
+
+    // 合并失败列表
+    allFailed := mergeFailed(dlFailed, ulFailed)
+    return allFailed, err
+}
+```
+
+### 3.4 涉及文件
+
+| 文件 | 变更 | 估计行数 |
+|------|------|---------|
+| `internal/core/ports/relay_transfer.go` | 新端口接口 | ~20 |
+| `internal/adapters/data/transfer/relay_transfer_service.go` | 新适配器 | ~120 |
+
+## 4. TransferModal 适配
+
+### 4.1 现有模式分析
+
+`TransferModal` 已经有多种模式（transfer_modal.go）：
+- `modeProgress` -- 单文件传输进度
+- `modeCancelConfirm` -- 取消确认
+- `modeConflictDialog` -- 冲突解决
+- `modeSummary` -- 传输完成摘要
+- `modeCopy` -- 远端复制（download + re-upload）
+- `modeMove` -- 远端移动
+
+### 4.2 新增模式：modeRelay
+
+双远端传输与 `modeCopy`（远端复制）的进度显示几乎相同：都是两阶段（下载 -> 上传），都需要在阶段切换时重置进度条。
+
+**推荐：复用 `modeCopy` 模式，不新增 `modeRelay`。**
+
+理由：
+1. `CopyRemoteFile` 的 UI 流程（download progress -> reset -> upload progress）与 `RelayFile` 完全一致
+2. `ShowCopy(filename)` 的显示文本（"Copying: filename"）可以改为更通用的标签
+3. 中转传输的 `handleRemotePaste()` 已经使用 `modeCopy` 模式（file_browser.go:1239-1288）
+4. `fileLabel` 字段已经支持动态更新（如 "Downloading: filename" / "Uploading: filename"）
+
+**需要的修改：**
+- `ShowCopy()` 方法可以保持不变，或者新增 `ShowRelay(srcLabel, dstLabel, filename)` 方法提供更精确的标签
+- 进度回调中的 `fileLabel` 更新逻辑（类似 `remotePasteFile` 和 `handleRemoteMove` 中的模式）
+
+```go
+// DualRemoteFileBrowser 中的传输启动
+func (drfb *DualRemoteFileBrowser) initiateRelayFileTransfer() {
+    // ...收集文件信息...
+
+    fb.transferModal.SetDismissCallback(/* ... */)
+    fb.transferModal.ShowCopy(fi.Name)  // 复用 ShowCopy
+
+    go func() {
+        var dlDone bool
+        combinedProgress := func(p domain.TransferProgress) {
+            if p.Done && !dlDone {
+                dlDone = true
+                drfb.app.QueueUpdateDraw(func() {
+                    drfb.transferModal.ResetProgress()
+                    drfb.transferModal.fileLabel = fmt.Sprintf("Uploading to %s: %s",
+                        drfb.relaySvc.DstLabel(), fi.Name)
+                })
+                return
+            }
+            label := fmt.Sprintf("Downloading from %s: %s",
+                drfb.relaySvc.SrcLabel(), fi.Name)
+            drfb.app.QueueUpdateDraw(func() {
+                drfb.transferModal.fileLabel = label
+                drfb.transferModal.Update(p)
+            })
+        }
+
+        err := drfb.relaySvc.RelayFile(ctx, srcPath, dstPath, combinedProgress, onConflict)
+        // ...处理结果...
+    }()
+}
+```
+
+### 4.3 涉及文件
+
+| 文件 | 变更 | 估计行数 |
+|------|------|---------|
+| `internal/adapters/ui/file_browser/transfer_modal.go` | 可能新增 `SrcLabel()`/`DstLabel()` 暴露方法 | +10 |
+
+**或者不修改 TransferModal**：所有标签逻辑在 `DualRemoteFileBrowser` 的回调中处理（通过直接设置 `transferModal.fileLabel`），与现有 `remotePasteFile` 模式一致。
+
+## 5. 同 Pane 内文件操作
+
+双远端浏览器中，用户可能需要在同一台服务器上复制/移动/删除文件。这些操作需要通过各自的 SFTPService 执行。
+
+### 5.1 同 Pane 复制/移动
+
+复用现有 `CopyRemoteFile`/`CopyRemoteDir` 模式（单 SFTP 内的 download-to-temp + re-upload）：
+
+```go
+func (drfb *DualRemoteFileBrowser) handleRemotePaste() {
+    // 类似 FileBrowser.handleRemotePaste()
+    // 但使用 leftPane 或 rightPane 的 sftpService
+    sftpSvc := drfb.getActiveSFTPService()
+    // 创建 transfer.New(log, sftpSvc) 执行同服务器复制
+}
+```
+
+### 5.2 同 Pane 删除/重命名/新建目录
+
+直接使用 `SFTPService` 的 `Remove`/`RemoveAll`/`Rename`/`Mkdir` 方法，与 FileBrowser 中的 `handleDelete`/`handleRename`/`handleMkdir` 模式完全一致。
+
+### 5.3 辅助方法
+
+```go
+// getActiveSFTPService 返回当前活跃 pane 对应的 SFTPService
+func (drfb *DualRemoteFileBrowser) getActiveSFTPService() ports.SFTPService {
+    if drfb.activePane == 0 {
+        return drfb.sftpA
+    }
+    return drfb.sftpB
+}
+```
+
+## 6. 数据流图
+
+### 6.1 T 键标记 -> 打开双远端浏览器
+
+```
+Server List
+  │ user presses 'T' on server-a
+  ├─> handleMarkForDualRemote()
+  │     markedServers[0] = server-a
+  │     markedCount = 1
+  │     status bar: "Marked 1/2: source = user@host-a"
   │
-  └── FileBrowser (F key from server list)
-      ├── localPane
-      │   └── 'r' -> LocalRecentDirs overlay [Phase B]
-      ├── remotePane
-      │   └── 'r' -> RecentDirs overlay (existing)
-      └── localRecentDirs (*LocalRecentDirs) [Phase B]
-
-DualRemoteFileBrowser (M key from server list) [Phase C]
-  ├── leftRemotePane  (Server A)
-  ├── rightRemotePane (Server B)
-  ├── transferModal (modeRelay)
-  └── confirmDialog
+  │ user navigates to server-b, presses 'T'
+  ├─> handleMarkForDualRemote()
+  │     markedServers[1] = server-b
+  │     markedCount = 2
+  │     status bar: "Marked 2/2. Press T to transfer, Esc to clear."
+  │
+  │ user presses 'T' again (markedCount == 2)
+  └─> handleOpenDualRemote()
+        DualRemoteFileBrowser(serverA, serverB)
+        app.SetRoot(dualBrowser, true)
 ```
 
-## Anti-Patterns to Avoid
+### 6.2 中转文件传输
 
-### 1. Don't try to mode-switch FileBrowser for dual-remote
-FileBrowser has hard-coded local+remote semantics throughout (activePane, pane type checks, clipboard source pane). Adding a "dual remote mode" would require `if/else` branches everywhere. A separate component is cleaner.
+```
+DualRemoteFileBrowser
+  │ user selects file in leftPane, presses Enter
+  ├─> initiateRelayFileTransfer()
+  │     srcPath = leftPane.currentPath + "/" + filename
+  │     dstPath = rightPane.currentPath + "/" + filename
+  │     direction = "Relaying"
+  │
+  │     TransferModal.ShowCopy(filename)
+  │
+  │     goroutine:
+  │     └─> relaySvc.RelayFile(ctx, srcPath, dstPath, onProgress, onConflict)
+  │           │
+  │           ├─ Phase 1: dlSvc.DownloadFile(ctx, srcPath, tmpPath, ...)
+  │           │   srcSFTP.OpenRemoteFile(srcPath) -> reader
+  │           │   os.Create(tmpPath) -> writer
+  │           │   copyWithProgress(32KB buffer)
+  │           │   onProgress -> QueueUpdateDraw -> TransferModal.Update()
+  │           │
+  │           ├─ Phase 2: ulSvc.UploadFile(ctx, tmpPath, dstPath, ...)
+  │           │   os.Open(tmpPath) -> reader
+  │           │   dstSFTP.CreateRemoteFile(dstPath) -> writer
+  │           │   copyWithProgress(32KB buffer)
+  │           │   onProgress -> QueueUpdateDraw -> TransferModal.Update()
+  │           │
+  │           └─ Cleanup: os.Remove(tmpPath)
+  │
+  └─> QueueUpdateDraw: refresh rightPane, hide TransferModal
+```
 
-### 2. Don't share SFTPClient between TransferService and RelayTransferService
-Each SFTPClient manages one SSH process. Sharing would cause concurrent access issues (mutex contention at best, data corruption at worst). Always create new instances.
+## 7. 组件边界与职责
 
-### 3. Don't forget to close both SFTP connections on DualRemoteFileBrowser close
-The `close()` method must close BOTH sftpA and sftpB. Use goroutines (like existing FileBrowser.close()) to avoid blocking UI.
+| 组件 | 职责 | 依赖 | 通信方式 |
+|------|------|------|---------|
+| `tui` (tui.go) | 持有标记状态，处理 T 键和打开 browser | ServerList, DualRemoteFileBrowser | handleMarkForDualRemote -> app.SetRoot |
+| `ServerList` (server_list.go) | 展示服务器列表，支持标记前缀渲染 | tview.List | UpdateMarkLabels() 更新行文本 |
+| `DualRemoteFileBrowser` | 双远端文件浏览器根组件 | RemotePane x2, TransferModal, ConfirmDialog, RelayTransferService | SetInputCapture 键路由 |
+| `RelayTransferService` (port) | 中转传输端口接口 | TransferProgress, ConflictHandler | RelayFile/RelayDir 方法 |
+| `relayTransferService` (adapter) | 中转传输实现 | SFTPService x2, transfer.New() x2 | 创建临时 service 实例 |
+| `RemotePane` (复用) | 远端文件浏览，无修改 | SFTPService | OnFileAction 回调 |
 
-### 4. Don't store local path history per-server
-Local paths are independent of which remote server you're connected to. The user's upload directory is the same whether they're connected to server-a or server-b. Keep local path history global.
+## 8. 依赖注入链
 
-### 5. Don't add RelayTransferService to the DI chain in main.go
-The relay service needs runtime-determined SFTP connections (user picks servers in UI). Create it inside DualRemoteFileBrowser when servers are known.
+### 8.1 现有 DI 链（不变）
 
-### 6. Don't stream relay transfer without temp files
-While theoretically possible (pipe src reader to dst writer), it loses progress accuracy and retry capability. The temp file approach is proven (CopyRemoteFile uses it).
+```
+cmd/main.go
+  -> sftp_client.New(log) -> sftpService
+  -> transfer.New(log, sftpService) -> transferService
+  -> NewTUI(log, serverSvc, fileSvc, sftpService, transferService, ...)
+```
 
-## Scalability Considerations
+### 8.2 双远端 DI 链（内部创建）
 
-| Concern | Current (v1.2) | v1.3 | Future |
-|---------|---------------|------|--------|
-| Overlay count | 4 | 6 (+LocalRecentDirs, ServerPicker) | Consider overlay manager at 6+ |
-| TUI key bindings | ~15 in server list | ~17 (+D, M) | Approaching limit |
-| SFTP connections | 1 per FileBrowser | 2 per DualRemoteFileBrowser | Parallel relay? |
-| Services in DI chain | 4 | 5 (+PathHistoryService) | Still manageable |
-| New top-level components | 1 (FileBrowser) | 2 (+DualRemoteFileBrowser) | Consider component registry |
+```
+handleOpenDualRemote() [handlers.go]
+  -> sftp_client.New(log) -> sftpA
+  -> sftp_client.New(log) -> sftpB
+  -> relay_transfer.New(log, sftpA, sftpB, serverA, serverB) -> relaySvc
+  -> NewDualRemoteFileBrowser(app, log, serverA, serverB, onClose)
+```
 
-**Key binding crowding mitigation:** At 17 bindings in the server list, we're approaching the memorability limit. The `M` key for dual-remote is acceptable because it's a power-user feature. Future features should consider prefix modes or a command palette.
+**关键决策：不在 main.go 中创建 RelayTransferService。**
+- 服务器对在运行时由用户选择（T 键标记），编译时未知
+- SFTPClient 实例需要在打开 browser 时创建（与特定服务器绑定）
+- 内部创建保持 main.go 的 DI 链简洁
+
+## 9. 反模式警告
+
+### 9.1 不要在 FileBrowser 中添加 isDualRemote 标志
+
+如前分析，FileBrowser 有 6+ 处硬编码假设。添加模式标志会导致每个方法都需要条件分支，代码可读性和可维护性急剧下降。
+
+### 9.2 不要共享 SFTPClient 实例
+
+每个 SFTPClient 管理一个独立的 `exec.Cmd("ssh")` 进程。共享实例会导致：
+- 并发操作时的 mutex 争用
+- `Close()` 调用杀死共享进程
+- 连接状态不一致
+
+### 9.3 不要尝试直连传输（跳过本地中转）
+
+SFTP 协议不支持服务器到服务器的直连传输。`scp -3` 可以做到但无法提供进度反馈。本地中转（download + upload）是唯一可行方案。
+
+### 9.4 不要在 close() 中阻塞等待 SFTP 连接关闭
+
+`SFTPClient.Close()` 会 Kill SSH 进程并 Wait。必须在 goroutine 中执行，否则会阻塞 UI 线程。现有 FileBrowser.close() 已遵循此模式。
+
+### 9.5 不要让标记状态泄漏到 FileBrowser
+
+`markedServers` 只存在于 TUI 层。打开 `DualRemoteFileBrowser` 后，标记状态应该清除（因为已经消费了）。返回主界面时，`markedServers` 应该是空的。
+
+## 10. 构建顺序
+
+### Phase 1: T 键标记机制（服务器列表层）
+**估计：** ~100 行，1 个 plan
+
+依赖：无
+交付物：
+- `tui.go` 新增标记状态字段
+- `handlers.go` 新增 `handleMarkForDualRemote()`，T 键绑定，Esc 清除
+- `server_list.go` 新增 `UpdateMarkLabels()` 方法
+
+### Phase 2: RelayTransferService（端口 + 适配器）
+**估计：** ~140 行，1 个 plan
+
+依赖：无（独立于 Phase 1）
+交付物：
+- `ports/relay_transfer.go` 新端口接口
+- `transfer/relay_transfer_service.go` 新适配器
+- 单元测试
+
+### Phase 3: DualRemoteFileBrowser 组件
+**估计：** ~700 行，2-3 个 plan
+
+依赖：Phase 1（T 键标记），Phase 2（RelayTransferService）
+交付物：
+- `dual_remote_browser.go` 根组件（build, layout, close, Draw）
+- `dual_remote_handlers.go` 键路由（handleGlobalKeys, switchFocus, initiateRelayTransfer）
+- 同 pane 操作（handleDelete, handleRename, handleMkdir, handleCopy, handleMove, handlePaste）
+- `handlers.go` 中 `handleOpenDualRemote()` 连接 Phase 1 和 Phase 3
+
+### Phase 顺序理由
+
+- Phase 1 和 Phase 2 可以并行开发（无依赖）
+- Phase 3 依赖两者，必须最后构建
+- Phase 1 最简单，可以快速验证 T 键 UX
+- Phase 2 是纯数据层，可以独立单元测试
+- Phase 3 是集成层，将 Phase 1 的 UI 入口和 Phase 2 的传输逻辑连接起来
+
+## 11. 与现有模式的对应关系
+
+| 双远端概念 | 对应的现有模式 | 源文件 |
+|-----------|--------------|--------|
+| 两个并行 SFTP 连接 | FileBrowser 的单个 SFTP 连接 | file_browser.go:243-255 |
+| 中转传输（download + upload） | CopyRemoteFile 的两阶段模式 | transfer_service.go:436-472 |
+| 进度显示（两阶段重置） | remotePasteFile 的 combinedProgress | file_browser.go:1352-1370 |
+| 临时文件管理 | CopyRemoteFile 的 defer os.Remove | transfer_service.go:449 |
+| 冲突处理 channel 同步 | buildConflictHandler 模式 | file_browser.go:565-623 |
+| Overlay draw chain | FileBrowser.Draw() | file_browser.go:262-278 |
+| close() 中 goroutine 关闭连接 | FileBrowser.close() | file_browser.go:135-143 |
+| 键路由层级（overlay > global > pane） | handleGlobalKeys 模式 | file_browser_handlers.go:33-114 |
 
 ## Sources
 
 - **HIGH confidence (project source code):**
-  - `internal/core/ports/file_service.go` -- FileService + SFTPService interfaces
-  - `internal/core/ports/transfer.go` -- TransferService interface (reference for RelayTransferService)
-  - `internal/core/ports/services.go` -- ServerService.AddServer() (reused by Dup SSH)
-  - `internal/core/ports/repositories.go` -- ServerRepository.AddServer()
-  - `internal/adapters/data/transfer/transfer_service.go` -- copyWithProgress, CopyRemoteFile pattern
-  - `internal/adapters/data/sftp_client/sftp_client.go` -- SFTPClient connection model
-  - `internal/adapters/ui/file_browser/file_browser.go` -- FileBrowser component structure
-  - `internal/adapters/ui/file_browser/file_browser_handlers.go` -- Key routing chain
-  - `internal/adapters/ui/file_browser/recent_dirs.go` -- Persistence pattern (JSON MRU)
-  - `internal/adapters/ui/file_browser/transfer_modal.go` -- Modal mode system
-  - `internal/adapters/ui/file_browser/local_pane.go` -- LocalPane callbacks
-  - `internal/adapters/ui/handlers.go` -- Server list key routing, handleFileBrowser()
-  - `internal/adapters/ui/tui.go` -- TUI struct, DI chain
-  - `cmd/main.go` -- Application bootstrap
-  - `internal/adapters/data/ssh_config_file/ssh_config_file_repo.go` -- AddServer implementation
-  - `internal/core/services/server_service.go` -- validateServer, AddServer
+  - `internal/core/ports/file_service.go` -- SFTPService interface
+  - `internal/core/ports/transfer.go` -- TransferService interface (RelayTransferService 参考模板)
+  - `internal/adapters/data/transfer/transfer_service.go` -- copyWithProgress, CopyRemoteFile, DownloadFile, UploadFile 实现
+  - `internal/adapters/data/sftp_client/sftp_client.go` -- SFTPClient 连接模型、独立实例模式
+  - `internal/adapters/ui/file_browser/file_browser.go` -- FileBrowser 组件结构、build/close/Draw 模式
+  - `internal/adapters/ui/file_browser/file_browser_handlers.go` -- 键路由、handlePaste/handleRemotePaste/handleRemoteMove
+  - `internal/adapters/ui/file_browser/remote_pane.go` -- RemotePane 组件（双远端复用两个实例）
+  - `internal/adapters/ui/file_browser/local_pane.go` -- LocalPane（双远端不使用，但作为对比参考）
+  - `internal/adapters/ui/handlers.go` -- TUI 层键路由、handleFileBrowser() 模式
+  - `internal/adapters/ui/server_list.go` -- ServerList 组件
+  - `internal/adapters/ui/tui.go` -- TUI struct、DI 链
+  - `.planning/PROJECT.md` -- v1.4 需求定义（T 键标记、双远端互传）
 
 ---
-*Architecture research: 2026-04-15 (v1.3 Enhanced File Browser)*
+*Architecture research: 2026-04-15 (v1.4 Dual-Remote File Transfer)*
