@@ -8,6 +8,15 @@
 
 在终端内完成 SSH 文件传输和文件管理，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、操作，全部键盘驱动。
 
+## Current Milestone: v1.3 Enhanced File Browser
+
+**Goal:** 增强文件浏览器体验——持久化本地路径历史、快速复制 SSH 连接、支持双远端文件互传
+
+**Target features:**
+- 本地路径历史持久化（记录上传/下载路径，存储在 ~/.lazyssh/）
+- Dup SSH 连接（服务器列表 d 键复制配置创建新条目）
+- 双远端文件互传（选两台不同服务器，本机中转，分阶段进度）
+
 ## Current State
 
 v1.2 shipped 2026-04-15 — 文件传输 + 文件管理功能完整。
@@ -59,7 +68,9 @@ v1.2 shipped 2026-04-15 — 文件传输 + 文件管理功能完整。
 
 ### Active
 
-(无 — 运行 `/gsd:new-milestone` 定义下一版本需求)
+- ☐ 本地路径历史持久化 — 记录上传/下载操作过的本地路径，MRU 列表，存储在 ~/.lazyssh/ (v1.3)
+- ☐ Dup SSH 连接 — 服务器列表 d 键复制当前服务器配置创建新条目 (v1.3)
+- ☐ 双远端文件互传 — 在服务器列表按快捷键选两台不同服务器（左+右），本机中转传输，分阶段进度显示 (v1.3)
 
 ### Out of Scope
 
@@ -71,12 +82,13 @@ v1.2 shipped 2026-04-15 — 文件传输 + 文件管理功能完整。
 - 路径缩写显示 — v1.x
 - 数字键快速选择 — v1.x
 - 持久化书签/收藏夹 — v2+
-- 跨面板复制/移动（本地→远程=上传，远程→本地=下载）— v1.3+
+- 跨面板复制/移动（本地→远程=上传，远程→本地=下载）— v2+
 - 文件搜索/过滤 — 独立功能，适合单独 milestone
 - 拖拽排序 — v2+
 - 文件属性编辑（chmod/chown）— v2+
 - 符号链接创建和管理 — v2+
 - 撤销操作 — 实现复杂度高，需要操作日志和逆操作链
+- 同服务器双目录互传 — v1.3 仅支持不同服务器间的双远端互传
 
 ## Context
 
@@ -86,6 +98,7 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 - v1.0 (2026-04-13): 文件传输核心功能 — 双栏浏览器、上传/下载、进度显示、冲突处理 (3 phases, 9 plans)
 - v1.1 (2026-04-14): 最近远程目录快速跳转 — MRU 记录 + 弹出列表 (2 phases, 3 plans)
 - v1.2 (2026-04-15): 文件管理操作 — 删除/重命名/新建/复制/移动/冲突对话框 (3 phases, 7 plans)
+- v1.3 (2026-04-15): 增强文件浏览器 — 本地路径历史持久化、Dup SSH 连接、双远端文件互传 (in progress)
 
 **技术栈：** Go 1.24.6, tview/tcell TUI, Cobra CLI, Zap logging, 系统 SSH/SFTP
 
@@ -127,4 +140,4 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-15 — v1.2 shipped*
+*Last updated: 2026-04-15 — v1.3 started*
