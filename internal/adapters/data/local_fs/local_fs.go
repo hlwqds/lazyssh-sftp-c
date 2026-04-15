@@ -144,22 +144,24 @@ func (l *LocalFS) Stat(path string) (os.FileInfo, error) {
 
 // Copy copies a single file from src to dst, preserving permissions and modification time.
 func (l *LocalFS) Copy(src, dst string) error {
+	//nolint:gosec // G304: paths are validated by caller (FileBrowser)
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	srcInfo, err := srcFile.Stat()
 	if err != nil {
 		return fmt.Errorf("stat source: %w", err)
 	}
 
+	//nolint:gosec // G304: dst is constructed from user-selected path + validated name
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return fmt.Errorf("copy data: %w", err)

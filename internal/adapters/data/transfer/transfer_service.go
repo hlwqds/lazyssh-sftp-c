@@ -445,8 +445,8 @@ func (ts *transferService) CopyRemoteFile(
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close() // DownloadFile will create its own handle
-	defer os.Remove(tmpPath) // always clean up temp (Pitfall 3)
+	_ = tmpFile.Close()                       // DownloadFile will create its own handle
+	defer func() { _ = os.Remove(tmpPath) }() // always clean up temp (Pitfall 3)
 
 	// Phase 1: Download remote source to temp
 	dlProgress := func(p domain.TransferProgress) {
@@ -484,7 +484,7 @@ func (ts *transferService) CopyRemoteDir(
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir) // always clean up (Pitfall 3)
+	defer func() { _ = os.RemoveAll(tmpDir) }() // always clean up (Pitfall 3)
 
 	// Extract directory name for temp sub-path
 	srcBase := filepath.Base(remoteSrc)
@@ -510,12 +510,16 @@ func (ts *transferService) CopyRemoteDir(
 	ulFailed, err := ts.UploadDir(ctx, tmpBase, remoteDst, ulProgress, onConflict)
 	if err != nil {
 		// Combine failed files from both phases
-		allFailed := append(dlFailed, ulFailed...)
+		allFailed := make([]string, len(dlFailed)+len(ulFailed))
+		copy(allFailed, dlFailed)
+		copy(allFailed[len(dlFailed):], ulFailed)
 		return allFailed, fmt.Errorf("upload dir for copy: %w", err)
 	}
 
 	// Combine any failed files from both phases
-	allFailed := append(dlFailed, ulFailed...)
+	allFailed := make([]string, len(dlFailed)+len(ulFailed))
+	copy(allFailed, dlFailed)
+	copy(allFailed[len(dlFailed):], ulFailed)
 	return allFailed, nil
 }
 

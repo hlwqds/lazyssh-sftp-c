@@ -48,7 +48,7 @@ const (
 // Stored on FileBrowser (not per-pane) for cross-directory navigation persistence (CLP-02, D-04).
 type Clipboard struct {
 	Active     bool
-	SourcePane int            // 0 = local, 1 = remote
+	SourcePane int // 0 = local, 1 = remote
 	FileInfo   domain.FileInfo
 	SourceDir  string
 	Operation  ClipboardOp
@@ -73,7 +73,7 @@ type FileBrowser struct {
 	confirmDialog  *ConfirmDialog
 	inputDialog    *InputDialog
 	clipboard      Clipboard // Phase 7: copy/paste state
-	activePane     int // 0 = local, 1 = remote
+	activePane     int       // 0 = local, 1 = remote
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose        func()
@@ -949,150 +949,165 @@ func (fb *FileBrowser) handlePaste() {
 	targetPath := fb.buildPath(fb.activePane, currentPath, targetName)
 
 	if fb.activePane == 0 {
-		// Local paste: synchronous copy in goroutine
-		go func() {
-			var err error
-			if fb.clipboard.FileInfo.IsDir {
-				err = fb.fileService.CopyDir(sourcePath, targetPath)
-			} else {
-				err = fb.fileService.Copy(sourcePath, targetPath)
-			}
-			fb.app.QueueUpdateDraw(func() {
-				if err != nil {
-					fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
-					return // D-05: do NOT clear clipboard on failure
-				}
-				fb.clipboard = Clipboard{} // D-05: clear on success
-				fb.refreshPane(fb.activePane)
-				fb.focusOnItem(fb.activePane, targetName)
-				fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
-			})
-		}()
+		fb.handleLocalPaste(sourcePath, targetPath, targetName)
 	} else {
-		// Remote paste: show TransferModal in modeCopy, then copy in goroutine
-		fb.transferring = true
-		ctx, cancel := context.WithCancel(context.Background())
-		fb.transferCancel = cancel
-
-		fb.transferModal.SetDismissCallback(func() {
-			if fb.transferModal.IsCanceled() {
-				if fb.transferCancel != nil {
-					fb.transferCancel()
-				}
-				return
-			}
-			fb.transferring = false
-			fb.app.SetRoot(fb, true)
-			fb.app.SetFocus(fb.currentPane())
-		})
-		fb.transferModal.ShowCopy(fb.clipboard.FileInfo.Name)
-
-		go func() {
-			var err error
-			onConflict := fb.buildConflictHandler()
-
-			if fb.clipboard.FileInfo.IsDir {
-				// Remote directory copy: download+re-upload with phase labels
-				dlProgress := func(p domain.TransferProgress) {
-					if p.FileName != "" {
-						p.FileName = "Downloading: " + p.FileName
-					}
-					fb.app.QueueUpdateDraw(func() {
-						fb.transferModal.fileLabel = p.FileName
-						if p.BytesTotal > 0 || p.Done || p.Failed {
-							fb.transferModal.Update(p)
-						}
-					})
-				}
-				// Download phase
-				tmpDir, tmpErr := os.MkdirTemp("", "lazyssh-copydir-*")
-				if tmpErr != nil {
-					fb.app.QueueUpdateDraw(func() {
-						fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(tmpErr.Error(), 50)))
-						fb.transferring = false
-						fb.transferModal.Hide()
-					})
-					return
-				}
-				defer os.RemoveAll(tmpDir)
-				srcBase := filepath.Base(sourcePath)
-				tmpBase := filepath.Join(tmpDir, srcBase)
-				dlFailed, dlErr := fb.transferSvc.DownloadDir(ctx, sourcePath, tmpBase, dlProgress, nil)
-				if dlErr != nil && ctx.Err() == nil {
-					fb.app.QueueUpdateDraw(func() {
-						fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(dlErr.Error(), 50)))
-						fb.transferring = false
-						fb.transferModal.Hide()
-					})
-					return
-				}
-
-				// Upload phase
-				ulProgress := func(p domain.TransferProgress) {
-					if p.FileName != "" {
-						p.FileName = "Uploading: " + p.FileName
-					}
-					fb.app.QueueUpdateDraw(func() {
-						fb.transferModal.fileLabel = p.FileName
-						if p.BytesTotal > 0 || p.Done || p.Failed {
-							fb.transferModal.Update(p)
-						}
-					})
-				}
-				var ulFailed []string
-				ulFailed, err = fb.transferSvc.UploadDir(ctx, tmpBase, targetPath, ulProgress, onConflict)
-
-				// Combine results
-				if err == nil && len(dlFailed) == 0 && len(ulFailed) == 0 {
-					err = nil
-				} else if err == nil {
-					allFailed := append(dlFailed, ulFailed...)
-					err = fmt.Errorf("%d files failed", len(allFailed))
-				}
-			} else {
-				// Remote single file copy
-				// CopyRemoteFile handles download+re-upload internally (Plan 01)
-				var dlDone bool
-				combinedProgress := func(p domain.TransferProgress) {
-					if !dlDone {
-						fb.transferModal.fileLabel = fmt.Sprintf("Downloading: %s", fb.clipboard.FileInfo.Name)
-					} else {
-						fb.transferModal.fileLabel = fmt.Sprintf("Uploading: %s", targetName)
-					}
-					if p.Done {
-						dlDone = true
-					}
-					fb.app.QueueUpdateDraw(func() {
-						fb.transferModal.Update(p)
-					})
-				}
-				err = fb.transferSvc.CopyRemoteFile(ctx, sourcePath, targetPath, combinedProgress, onConflict)
-			}
-
-			fb.app.QueueUpdateDraw(func() {
-				fb.transferCancel = nil
-				if ctx.Err() == context.Canceled {
-					fb.transferModal.ShowCanceledSummary()
-					return
-				}
-				if err != nil {
-					fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
-					fb.transferring = false
-					fb.transferModal.Hide()
-					return // D-05: do NOT clear clipboard on failure
-				}
-				fb.transferModal.Hide()
-				fb.transferring = false
-				fb.clipboard = Clipboard{} // D-05: clear on success
-				fb.refreshPane(fb.activePane)
-				fb.focusOnItem(fb.activePane, targetName)
-				fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
-			})
-		}()
+		fb.handleRemotePaste(sourcePath, targetPath, targetName)
 	}
 }
 
-// getFileService returns the appropriate FileService for the active pane.
+// handleLocalPaste performs a local file copy in a goroutine (CPY-02).
+func (fb *FileBrowser) handleLocalPaste(sourcePath, targetPath, targetName string) {
+	go func() {
+		var err error
+		if fb.clipboard.FileInfo.IsDir {
+			err = fb.fileService.CopyDir(sourcePath, targetPath)
+		} else {
+			err = fb.fileService.Copy(sourcePath, targetPath)
+		}
+		fb.app.QueueUpdateDraw(func() {
+			if err != nil {
+				fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
+				return // D-05: do NOT clear clipboard on failure
+			}
+			fb.clipboard = Clipboard{} // D-05: clear on success
+			fb.refreshPane(fb.activePane)
+			fb.focusOnItem(fb.activePane, targetName)
+			fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
+		})
+	}()
+}
+
+// handleRemotePaste performs a remote file copy via TransferModal (CPY-02, D-08).
+func (fb *FileBrowser) handleRemotePaste(sourcePath, targetPath, targetName string) {
+	fb.transferring = true
+	ctx, cancel := context.WithCancel(context.Background())
+	fb.transferCancel = cancel
+
+	fb.transferModal.SetDismissCallback(func() {
+		if fb.transferModal.IsCanceled() {
+			if fb.transferCancel != nil {
+				fb.transferCancel()
+			}
+			return
+		}
+		fb.transferring = false
+		fb.app.SetRoot(fb, true)
+		fb.app.SetFocus(fb.currentPane())
+	})
+	fb.transferModal.ShowCopy(fb.clipboard.FileInfo.Name)
+
+	go func() {
+		var err error
+		onConflict := fb.buildConflictHandler()
+
+		if fb.clipboard.FileInfo.IsDir {
+			err = fb.remotePasteDir(ctx, sourcePath, targetPath, onConflict)
+		} else {
+			err = fb.remotePasteFile(ctx, sourcePath, targetPath, targetName, onConflict)
+		}
+
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferCancel = nil
+			if ctx.Err() == context.Canceled {
+				fb.transferModal.ShowCanceledSummary()
+				return
+			}
+			if err != nil {
+				fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(err.Error(), 50)))
+				fb.transferring = false
+				fb.transferModal.Hide()
+				return // D-05: do NOT clear clipboard on failure
+			}
+			fb.transferModal.Hide()
+			fb.transferring = false
+			fb.clipboard = Clipboard{} // D-05: clear on success
+			fb.refreshPane(fb.activePane)
+			fb.focusOnItem(fb.activePane, targetName)
+			fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Copied: %s[-]", targetName))
+		})
+	}()
+}
+
+// remotePasteDir copies a remote directory by downloading to temp and re-uploading (D-01).
+func (fb *FileBrowser) remotePasteDir(ctx context.Context, sourcePath, targetPath string, onConflict domain.ConflictHandler) error {
+	dlProgress := func(p domain.TransferProgress) {
+		if p.FileName != "" {
+			p.FileName = "Downloading: " + p.FileName
+		}
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.fileLabel = p.FileName
+			if p.BytesTotal > 0 || p.Done || p.Failed {
+				fb.transferModal.Update(p)
+			}
+		})
+	}
+	tmpDir, tmpErr := os.MkdirTemp("", "lazyssh-copydir-*")
+	if tmpErr != nil {
+		fb.app.QueueUpdateDraw(func() {
+			fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(tmpErr.Error(), 50)))
+			fb.transferring = false
+			fb.transferModal.Hide()
+		})
+		return tmpErr
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+	srcBase := filepath.Base(sourcePath)
+	tmpBase := filepath.Join(tmpDir, srcBase)
+	dlFailed, dlErr := fb.transferSvc.DownloadDir(ctx, sourcePath, tmpBase, dlProgress, nil)
+	if dlErr != nil && ctx.Err() == nil {
+		fb.app.QueueUpdateDraw(func() {
+			fb.showStatusError(fmt.Sprintf("Copy failed: %s", trimError(dlErr.Error(), 50)))
+			fb.transferring = false
+			fb.transferModal.Hide()
+		})
+		return dlErr
+	}
+
+	ulProgress := func(p domain.TransferProgress) {
+		if p.FileName != "" {
+			p.FileName = "Uploading: " + p.FileName
+		}
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.fileLabel = p.FileName
+			if p.BytesTotal > 0 || p.Done || p.Failed {
+				fb.transferModal.Update(p)
+			}
+		})
+	}
+	ulFailed, err := fb.transferSvc.UploadDir(ctx, tmpBase, targetPath, ulProgress, onConflict)
+
+	if err == nil && len(dlFailed) == 0 && len(ulFailed) == 0 {
+		return nil
+	}
+	if err == nil {
+		allFailed := make([]string, len(dlFailed)+len(ulFailed))
+		copy(allFailed, dlFailed)
+		copy(allFailed[len(dlFailed):], ulFailed)
+		return fmt.Errorf("%d files failed", len(allFailed))
+	}
+	return err
+}
+
+// remotePasteFile copies a single remote file using CopyRemoteFile (Plan 01).
+func (fb *FileBrowser) remotePasteFile(ctx context.Context, sourcePath, targetPath, targetName string, onConflict domain.ConflictHandler) error {
+	var dlDone bool
+	combinedProgress := func(p domain.TransferProgress) {
+		if !dlDone {
+			fb.transferModal.fileLabel = fmt.Sprintf("Downloading: %s", fb.clipboard.FileInfo.Name)
+		} else {
+			fb.transferModal.fileLabel = fmt.Sprintf("Uploading: %s", targetName)
+		}
+		if p.Done {
+			dlDone = true
+		}
+		fb.app.QueueUpdateDraw(func() {
+			fb.transferModal.Update(p)
+		})
+	}
+	return fb.transferSvc.CopyRemoteFile(ctx, sourcePath, targetPath, combinedProgress, onConflict)
+}
+
+// getFileService returns the appropriate FileService for the active pane.// getFileService returns the appropriate FileService for the active pane.
 func (fb *FileBrowser) getFileService() ports.FileService {
 	if fb.activePane == 0 {
 		return fb.fileService
