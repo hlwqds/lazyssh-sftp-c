@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 -> 7 -> 8
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 6. Basic File Operations | v1.2 | 2/3 | In Progress|  |
+| 6. Basic File Operations | v1.2 | 2/3 | Complete    | 2026-04-15 |
 | 7. Copy & Clipboard | v1.2 | 0/? | Not started | - |
 | 8. Move & Integration | v1.2 | 0/? | Not started | - |
 
