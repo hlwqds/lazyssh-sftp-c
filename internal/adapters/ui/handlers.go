@@ -21,6 +21,7 @@ import (
 
 	"github.com/Adembc/lazyssh/internal/adapters/ui/file_browser"
 	"github.com/Adembc/lazyssh/internal/core/domain"
+	"github.com/Adembc/lazyssh/internal/core/ports"
 	"github.com/atotto/clipboard"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -37,6 +38,29 @@ const (
 	ForwardModeOnlyForward = "Only forward"
 	ForwardModeForwardSSH  = "Forward + SSH"
 )
+
+// generateUniqueAlias creates a unique alias by appending -copy suffix.
+// Format: original-copy, original-copy-2, original-copy-3, ...
+func generateUniqueAlias(baseAlias string, svc ports.ServerService) string {
+	candidate := baseAlias + "-copy"
+	existing, err := svc.ListServers("")
+	if err != nil {
+		return candidate
+	}
+	aliasSet := make(map[string]struct{}, len(existing))
+	for _, s := range existing {
+		aliasSet[s.Alias] = struct{}{}
+	}
+	if _, exists := aliasSet[candidate]; !exists {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		candidate = fmt.Sprintf("%s-copy-%d", baseAlias, i)
+		if _, exists := aliasSet[candidate]; !exists {
+			return candidate
+		}
+	}
+}
 
 func (t *tui) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	// Don't handle global keys when search has focus
@@ -59,6 +83,9 @@ func (t *tui) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case 'd':
 		t.handleServerDelete()
+		return nil
+	case 'D':
+		t.handleServerDup()
 		return nil
 	case 'p':
 		t.handleServerPin()
@@ -258,10 +285,74 @@ func (t *tui) handleServerEdit() {
 	}
 }
 
+func (t *tui) handleServerDup() {
+	server, ok := t.serverList.GetSelectedServer()
+	if !ok {
+		return
+	}
+
+	// Deep copy the server struct
+	dup := server
+
+	// Clear runtime metadata
+	dup.PinnedAt = time.Time{}
+	dup.SSHCount = 0
+	dup.LastSeen = time.Time{}
+
+	// Generate unique alias
+	dup.Alias = generateUniqueAlias(server.Alias, t.serverService)
+
+	// Copy slice fields to avoid shared references
+	if server.Aliases != nil {
+		dup.Aliases = make([]string, len(server.Aliases))
+		copy(dup.Aliases, server.Aliases)
+	}
+	if server.IdentityFiles != nil {
+		dup.IdentityFiles = make([]string, len(server.IdentityFiles))
+		copy(dup.IdentityFiles, server.IdentityFiles)
+	}
+	if server.Tags != nil {
+		dup.Tags = make([]string, len(server.Tags))
+		copy(dup.Tags, server.Tags)
+	}
+	if server.LocalForward != nil {
+		dup.LocalForward = make([]string, len(server.LocalForward))
+		copy(dup.LocalForward, server.LocalForward)
+	}
+	if server.RemoteForward != nil {
+		dup.RemoteForward = make([]string, len(server.RemoteForward))
+		copy(dup.RemoteForward, server.RemoteForward)
+	}
+	if server.DynamicForward != nil {
+		dup.DynamicForward = make([]string, len(server.DynamicForward))
+		copy(dup.DynamicForward, server.DynamicForward)
+	}
+	if server.SendEnv != nil {
+		dup.SendEnv = make([]string, len(server.SendEnv))
+		copy(dup.SendEnv, server.SendEnv)
+	}
+	if server.SetEnv != nil {
+		dup.SetEnv = make([]string, len(server.SetEnv))
+		copy(dup.SetEnv, server.SetEnv)
+	}
+
+	// Store the expected alias so handleServerSave can select it after save
+	t.dupPendingAlias = dup.Alias
+
+	// Open form in Add mode with pre-filled server
+	form := NewServerForm(ServerFormAdd, &dup).
+		SetApp(t.app).
+		SetVersionInfo(t.version, t.commit).
+		OnSave(t.handleServerSave).
+		OnCancel(t.handleFormCancel)
+	t.app.SetRoot(form, true)
+}
+
 func (t *tui) handleServerSave(server domain.Server, original *domain.Server) {
 	var err error
 	if original != nil {
-		// Edit mode
+		// Edit mode - clear any pending dup alias
+		t.dupPendingAlias = ""
 		err = t.serverService.UpdateServer(*original, server)
 	} else {
 		// Add mode
@@ -278,6 +369,19 @@ func (t *tui) handleServerSave(server domain.Server, original *domain.Server) {
 	}
 
 	t.refreshServerList()
+
+	// If this was a dup save, scroll to the new entry
+	if original == nil && t.dupPendingAlias != "" {
+		servers, _ := t.serverService.ListServers("")
+		for i, s := range servers {
+			if s.Alias == t.dupPendingAlias {
+				t.serverList.SetCurrentItem(i)
+				break
+			}
+		}
+		t.dupPendingAlias = ""
+	}
+
 	t.handleFormCancel()
 }
 
