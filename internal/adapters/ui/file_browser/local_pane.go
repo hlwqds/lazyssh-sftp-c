@@ -37,7 +37,7 @@ type LocalPane struct {
 	selected          map[string]bool // multi-select state: file name -> selected
 	onPathChange      func(path string)
 	onFileAction      func(fi domain.FileInfo)
-	clipboardProvider func() (bool, string, string) // returns (active, fileName, sourceDir) for [C] prefix check
+	clipboardProvider func() (bool, string, string, ClipboardOp) // returns (active, fileName, sourceDir, op) for [C]/[M] prefix check
 }
 
 // NewLocalPane creates a new LocalPane for browsing the local filesystem.
@@ -171,10 +171,15 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 		var nameAttrs tcell.AttrMask
 		var nameBg tcell.Color
 		if lp.clipboardProvider != nil {
-			if active, clipName, clipDir := lp.clipboardProvider(); active && clipName == fi.Name && clipDir == lp.currentPath {
-				nameText = "[C] " + nameText
-				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
-				nameBg = tcell.Color236               // dark background for visibility
+			if active, clipName, clipDir, op := lp.clipboardProvider(); active && clipName == fi.Name && clipDir == lp.currentPath {
+				if op == OpMove {
+					nameText = "[M] " + nameText
+					nameColor = tcell.GetColor("#FF6B6B") // red for move marker (MOV-01, UI-SPEC)
+				} else {
+					nameText = "[C] " + nameText
+					nameColor = tcell.GetColor("#00FF7F") // green for copy marker (CLP-01, UI-SPEC)
+				}
+				nameBg = tcell.Color236 // dark background for visibility
 				nameAttrs = tcell.AttrBold
 			} else if lp.selected[fi.Name] {
 				nameText = "* " + nameText
@@ -330,7 +335,7 @@ func (lp *LocalPane) OnFileAction(fn func(fi domain.FileInfo)) *LocalPane {
 }
 
 // SetClipboardProvider sets the callback for checking clipboard state during rendering.
-func (lp *LocalPane) SetClipboardProvider(provider func() (bool, string, string)) {
+func (lp *LocalPane) SetClipboardProvider(provider func() (bool, string, string, ClipboardOp)) {
 	lp.clipboardProvider = provider
 }
 

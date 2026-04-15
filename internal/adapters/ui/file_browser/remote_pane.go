@@ -39,7 +39,7 @@ type RemotePane struct {
 	connected         bool
 	onPathChange      func(path string)
 	onFileAction      func(fi domain.FileInfo)
-	clipboardProvider func() (bool, string, string) // returns (active, fileName, sourceDir) for [C] prefix check
+	clipboardProvider func() (bool, string, string, ClipboardOp) // returns (active, fileName, sourceDir, op) for [C]/[M] prefix check
 }
 
 // NewRemotePane creates a new RemotePane for browsing remote files.
@@ -226,10 +226,15 @@ func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
 		var nameAttrs tcell.AttrMask
 		var nameBg tcell.Color
 		if rp.clipboardProvider != nil {
-			if active, clipName, clipDir := rp.clipboardProvider(); active && clipName == fi.Name && clipDir == rp.currentPath {
-				nameText = "[C] " + nameText
-				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
-				nameBg = tcell.Color236               // dark background for visibility
+			if active, clipName, clipDir, op := rp.clipboardProvider(); active && clipName == fi.Name && clipDir == rp.currentPath {
+				if op == OpMove {
+					nameText = "[M] " + nameText
+					nameColor = tcell.GetColor("#FF6B6B") // red for move marker (MOV-01, UI-SPEC)
+				} else {
+					nameText = "[C] " + nameText
+					nameColor = tcell.GetColor("#00FF7F") // green for copy marker (CLP-01, UI-SPEC)
+				}
+				nameBg = tcell.Color236 // dark background for visibility
 				nameAttrs = tcell.AttrBold
 			} else if rp.selected[fi.Name] {
 				nameText = "* " + nameText
@@ -417,7 +422,7 @@ func (rp *RemotePane) OnFileAction(fn func(fi domain.FileInfo)) *RemotePane {
 }
 
 // SetClipboardProvider sets the callback for checking clipboard state during rendering.
-func (rp *RemotePane) SetClipboardProvider(provider func() (bool, string, string)) {
+func (rp *RemotePane) SetClipboardProvider(provider func() (bool, string, string, ClipboardOp)) {
 	rp.clipboardProvider = provider
 }
 

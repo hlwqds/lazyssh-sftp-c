@@ -56,6 +56,7 @@ const (
 	modeConflictDialog                  // Conflict resolution dialog (Plan 02)
 	modeSummary                         // Transfer complete/canceled summary (existing)
 	modeCopy                            // Phase 7: remote copy (download+re-upload) progress
+	modeMove                            // Phase 8: remote move (download+re-upload+delete) progress
 )
 
 // TransferModal is a full-screen overlay component that displays file transfer progress.
@@ -122,12 +123,16 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	if !tm.visible {
 		return
 	}
+
+	// Set full-screen rect before drawing (Pitfall 4: SetRect before DrawForSubclass)
+	termWidth, termHeight := screen.Size()
+	tm.SetRect(0, 0, termWidth, termHeight)
 	tm.Box.DrawForSubclass(screen, tm)
 
 	x, y, width, height := tm.GetInnerRect()
 
 	switch tm.mode {
-	case modeProgress, modeCopy:
+	case modeProgress, modeCopy, modeMove:
 		tm.drawProgress(screen, x, y, width, height)
 	case modeCancelConfirm:
 		tm.drawCancelConfirm(screen, x, y, width, height)
@@ -239,6 +244,19 @@ func (tm *TransferModal) ShowCopy(filename string) {
 	tm.bar = NewProgressBar()
 	tm.speedSamples = tm.speedSamples[:0]
 	tm.fileLabel = fmt.Sprintf("Copying: %s", filename)
+	tm.infoLine = ""
+	tm.etaLine = ""
+}
+
+// ShowMove switches the modal to move progress mode (D-08).
+func (tm *TransferModal) ShowMove(filename string) {
+	tm.visible = true
+	tm.mode = modeMove
+	tm.cancelConfirmed = false
+	tm.SetTitle(fmt.Sprintf(" Moving %s ", filename))
+	tm.bar = NewProgressBar()
+	tm.speedSamples = tm.speedSamples[:0]
+	tm.fileLabel = fmt.Sprintf("Moving: %s", filename)
 	tm.infoLine = ""
 	tm.etaLine = ""
 }
@@ -375,6 +393,14 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 
 	switch tm.mode {
 	case modeConflictDialog:
+		switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
+		case tcell.KeyEscape:
+			if tm.conflictActionCh != nil {
+				tm.conflictActionCh <- domain.ConflictSkip
+			}
+			tm.mode = modeProgress
+			return nil
+		}
 		switch event.Rune() {
 		case 'o':
 			if tm.conflictActionCh != nil {
@@ -424,7 +450,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		tm.Hide()
 		return nil
 
-	case modeProgress, modeCopy:
+	case modeProgress, modeCopy, modeMove:
 		switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 		case tcell.KeyEscape:
 			tm.ShowCancelConfirm()
@@ -440,7 +466,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 // The caller is responsible for wrapping calls in app.QueueUpdateDraw().
 // No-op if not in progress mode.
 func (tm *TransferModal) Update(p domain.TransferProgress) {
-	if tm.mode != modeProgress && tm.mode != modeCopy {
+	if tm.mode != modeProgress && tm.mode != modeCopy && tm.mode != modeMove {
 		return
 	}
 

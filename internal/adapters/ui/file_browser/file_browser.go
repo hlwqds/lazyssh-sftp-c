@@ -41,7 +41,8 @@ type ClipboardOp int
 const (
 	// OpCopy marks the clipboard for copy operation.
 	OpCopy ClipboardOp = iota
-	// OpMove is reserved for Phase 8.
+	// OpMove marks the clipboard for move operation (Phase 8).
+	OpMove
 )
 
 // Clipboard holds the state for copy/move clipboard operations.
@@ -123,12 +124,12 @@ func (fb *FileBrowser) build() {
 	fb.localPane = NewLocalPane(fb.log, fb.fileService, homeDir)
 	fb.remotePane = NewRemotePane(fb.log, fb.sftpService, fb.server)
 
-	// Wire clipboard provider for [C] prefix rendering (Phase 7)
-	fb.localPane.SetClipboardProvider(func() (bool, string, string) {
-		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir
+	// Wire clipboard provider for [C]/[M] prefix rendering (Phase 7/8)
+	fb.localPane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
+		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir, fb.clipboard.Operation
 	})
-	fb.remotePane.SetClipboardProvider(func() (bool, string, string) {
-		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir
+	fb.remotePane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
+		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir, fb.clipboard.Operation
 	})
 
 	// Create transfer modal
@@ -215,6 +216,11 @@ func (fb *FileBrowser) build() {
 	// reaches the terminal. Placed in AfterDrawFunc (not BeforeDrawFunc) so
 	// the sync sends the final content in one flush, avoiding blank flashes.
 	fb.app.SetAfterDrawFunc(func(screen tcell.Screen) {
+		// Skip status bar when transfer modal is visible (it has its own UI)
+		if fb.transferModal != nil && fb.transferModal.IsVisible() {
+			screen.Sync()
+			return
+		}
 		_, _, width, height := fb.GetRect()
 		if height >= 1 && fb.statusBar != nil {
 			sy := height - 1
@@ -273,12 +279,12 @@ func (fb *FileBrowser) Draw(screen tcell.Screen) {
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
 func (fb *FileBrowser) setStatusBarDefault() {
-	fb.statusBar.SetText("[white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText("[white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status to the status bar text.
 func (fb *FileBrowser) updateStatusBarConnection(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // GetLocalPane returns the local file pane.
@@ -378,7 +384,7 @@ func (fb *FileBrowser) initiateTransfer() {
 	// Start transfer in goroutine
 	go func() {
 		var firstErr error
-		onConflict := fb.buildConflictHandler()
+		onConflict := fb.buildConflictHandler(ctx)
 		for i, fi := range files {
 			var err error
 			if fb.activePane == 0 {
@@ -502,7 +508,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 		var failed []string
 		var err error
 
-		onConflict := fb.buildConflictHandler()
+		onConflict := fb.buildConflictHandler(ctx)
 		if fb.activePane == 0 {
 			// Upload directory
 			remoteBase := joinPath(fb.remotePane.GetCurrentPath(), dirName)
@@ -548,13 +554,15 @@ func (fb *FileBrowser) initiateDirTransfer() {
 
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // buildConflictHandler creates the onConflict callback for file transfers.
 // It uses a buffered channel (capacity 1) for goroutine synchronization:
 // the transfer goroutine blocks on <-actionCh while the UI thread handles user input.
-func (fb *FileBrowser) buildConflictHandler() domain.ConflictHandler {
+// The ctx parameter allows context cancellation to unblock the goroutine if the
+// user cancels the transfer while a conflict dialog is showing.
+func (fb *FileBrowser) buildConflictHandler(ctx context.Context) domain.ConflictHandler {
 	return func(fileName string) (domain.ConflictAction, string) {
 		actionCh := make(chan domain.ConflictAction, 1)
 
@@ -577,8 +585,13 @@ func (fb *FileBrowser) buildConflictHandler() domain.ConflictHandler {
 			fb.transferModal.ShowConflict(fileName, existingInfo, actionCh)
 		})
 
-		// Block until user makes a choice (goroutine blocks, UI thread is free)
-		action := <-actionCh
+		// Block until user makes a choice or context is canceled
+		var action domain.ConflictAction
+		select {
+		case action = <-actionCh:
+		case <-ctx.Done():
+			return domain.ConflictSkip, ""
+		}
 
 		switch action {
 		case domain.ConflictSkip:
@@ -910,6 +923,41 @@ func (fb *FileBrowser) handleCopy() {
 	fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Clipboard: %s[-]", fi.Name))
 }
 
+// handleMove handles the 'x' key: mark current file as move source (MOV-01, D-06).
+// Mirrors handleCopy exactly but uses OpMove and red color for status feedback.
+func (fb *FileBrowser) handleMove() {
+	// Get current selection
+	row, _ := fb.getActiveSelection()
+	cell := fb.getActiveCell(row, 0)
+	if cell == nil {
+		return
+	}
+	fi, ok := cell.GetReference().(domain.FileInfo)
+	if !ok {
+		return
+	}
+
+	// Remote pane connection check
+	if fb.activePane == 1 && !fb.remotePane.IsConnected() {
+		fb.showStatusError("Not connected to remote")
+		return
+	}
+
+	// Set clipboard state with OpMove (D-06)
+	fb.clipboard = Clipboard{
+		Active:     true,
+		SourcePane: fb.activePane,
+		FileInfo:   fi,
+		SourceDir:  fb.getCurrentPanePath(),
+		Operation:  OpMove, // D-06
+	}
+
+	// Refresh to show [M] prefix, then restore cursor position
+	fb.refreshPane(fb.activePane)
+	fb.focusOnItem(fb.activePane, fi.Name)
+	fb.updateStatusBarTemp(fmt.Sprintf("[#FF6B6B]Move: %s[-]", fi.Name)) // D-06, UI-SPEC red
+}
+
 // handlePaste handles the 'p' key: paste copied file to current directory (CPY-02).
 // Local paste: goroutine + QueueUpdateDraw (instant).
 // Remote paste: TransferModal in modeCopy for progress display (D-08).
@@ -1000,7 +1048,7 @@ func (fb *FileBrowser) handleRemotePaste(sourcePath, targetPath, targetName stri
 
 	go func() {
 		var err error
-		onConflict := fb.buildConflictHandler()
+		onConflict := fb.buildConflictHandler(ctx)
 
 		if fb.clipboard.FileInfo.IsDir {
 			err = fb.remotePasteDir(ctx, sourcePath, targetPath, onConflict)

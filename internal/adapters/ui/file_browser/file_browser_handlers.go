@@ -40,6 +40,10 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	if fb.confirmDialog != nil && fb.confirmDialog.IsVisible() {
 		return fb.confirmDialog.HandleKey(event)
 	}
+	// TransferModal intercepts ALL keys when visible (progress/cancel/conflict/summary modes)
+	if fb.transferModal != nil && fb.transferModal.IsVisible() {
+		return fb.transferModal.HandleKey(event)
+	}
 	if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
 		return fb.recentDirs.HandleKey(event)
 	}
@@ -49,10 +53,6 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		fb.switchFocus()
 		return nil
 	case tcell.KeyESC:
-		if fb.transferModal != nil && fb.transferModal.IsVisible() {
-			fb.transferModal.HandleKey(event) // delegates to modal's HandleKey
-			return nil
-		}
 		// D-05, CLP-03: clear clipboard before closing browser
 		if fb.clipboard.Active {
 			// Save cursor position before clearing [C] prefix
@@ -90,6 +90,9 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case 'c':
 		fb.handleCopy()
+		return nil
+	case 'x':
+		fb.handleMove()
 		return nil
 	case 'p':
 		fb.handlePaste()
