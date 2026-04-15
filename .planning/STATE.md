@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Dup SSH Connection
-status: roadmap-ready
-stopped_at: —
-last_updated: "2026-04-15T00:00:00.000Z"
-last_activity: 2026-04-15
+status: planning
+stopped_at: Phase 9 context gathered
+last_updated: "2026-04-15T12:45:48.161Z"
+last_activity: 2026-04-15 — Roadmap created for v1.3
 progress:
-  total_phases: 1
+  total_phases: 9
   completed_phases: 0
-  total_plans: 1
+  total_plans: 0
   completed_plans: 0
   percent: 0
 ---
@@ -53,6 +53,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15
-Stopped at: Roadmap created for v1.3
-Resume file: None
+Last session: 2026-04-15T12:45:48.157Z
+Stopped at: Phase 9 context gathered
+Resume file: .planning/phases/09-dup-ssh-connection/09-CONTEXT.md
