@@ -17,7 +17,7 @@
 
 ## Current State
 
-v1.2 shipped 2026-04-15 — 文件传输 + 文件管理功能完整。
+v1.3 shipped 2026-04-15 — Dup SSH 连接功能完整。
 
 **已交付功能：**
 - 双栏文件浏览器（本地 vs 远程）
@@ -63,10 +63,11 @@ v1.2 shipped 2026-04-15 — 文件传输 + 文件管理功能完整。
 - ✓ 文件/目录复制（c 标记 + p 粘贴，绿色 [C] 前缀）— v1.2
 - ✓ 文件/目录移动（x 标记 + p 粘贴，红色 [M] 前缀，copy+delete）— v1.2
 - ✓ 粘贴冲突对话框（覆盖/跳过/重命名，所有粘贴操作）— v1.2
+- ✓ Dup SSH 连接（D 键复制服务器配置，唯一别名，清除元数据，自动打开编辑表单）— v1.3
 
 ### Active
 
-- ☐ Dup SSH 连接 — 服务器列表 D 键复制当前服务器配置创建新条目 (v1.3)
+None — all planned features shipped.
 
 ### Out of Scope
 
@@ -95,7 +96,7 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 - v1.0 (2026-04-13): 文件传输核心功能 — 双栏浏览器、上传/下载、进度显示、冲突处理 (3 phases, 9 plans)
 - v1.1 (2026-04-14): 最近远程目录快速跳转 — MRU 记录 + 弹出列表 (2 phases, 3 plans)
 - v1.2 (2026-04-15): 文件管理操作 — 删除/重命名/新建/复制/移动/冲突对话框 (3 phases, 7 plans)
-- v1.3 (2026-04-15): Dup SSH 连接 — 服务器列表快速复制配置创建新条目 (in progress)
+- v1.3 (2026-04-15): Dup SSH 连接 — 服务器列表快速复制配置创建新条目 (1 phase, 1 plan)
 
 **技术栈：** Go 1.24.6, tview/tcell TUI, Cobra CLI, Zap logging, 系统 SSH/SFTP
 
@@ -137,4 +138,4 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-15 — v1.3 started*
+*Last updated: 2026-04-15 — v1.3 complete*
