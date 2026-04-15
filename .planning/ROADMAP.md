@@ -101,7 +101,7 @@ Plans:
 
 Plans:
 - [ ] 06-01-PLAN.md -- FileService port 接口扩展 + SFTPClient/LocalFS adapter 实现
-- [ ] 06-02-PLAN.md -- ConfirmDialog 和 InputDialog overlay 组件
+- [x] 06-02-PLAN.md -- ConfirmDialog 和 InputDialog overlay 组件
 - [ ] 06-03-PLAN.md -- FileBrowser 集成：按键路由 + delete/rename/mkdir handlers + overlay wiring
 
 ### Phase 7: Copy & Clipboard

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: File Operations
-status: planning
-stopped_at: Phase 6 context gathered
-last_updated: "2026-04-15T01:39:15.122Z"
-last_activity: 2026-04-15 — v1.2 roadmap created, 21 requirements mapped across 3 phases
+status: executing
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-04-15T02:02:24.698Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 1
   percent: 38
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、传输，全部键盘驱动。
-**Current focus:** Phase 6 - Basic File Operations
+**Current focus:** Phase 6 — basic-file-operations
 
 ## Current Position
 
-Phase: 6 of 8 (Basic File Operations)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-04-15 — v1.2 roadmap created, 21 requirements mapped across 3 phases
+Phase: 6 (basic-file-operations) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-15
 
 Progress: [████████████░░░░░░░░░░] 38% (5/8 phases shipped)
 
@@ -50,6 +50,7 @@ Progress: [████████████░░░░░░░░░░] 3
 | 5. Recent Dirs Popup | 1 | v1.1 |
 
 *Updated after each plan completion*
+| Phase 06 P02 | 206 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,9 @@ Recent decisions affecting current work:
 - [Phase 5]: RecentDirs stored in FileBrowser (not per-pane), keyed by host+directory for cross-server isolation
 - [Phase 3]: TransferModal multi-mode state machine (progress/cancelConfirm/conflictDialog/summary)
 - [Phase 2]: 32KB buffer with onProgress callback for transfer progress tracking
+- [Phase 06]: ConfirmDialog/InputDialog follow RecentDirs overlay pattern with full key interception
+- [Phase 06]: InputDialog InputField key routing via InputHandler() without tview focus system
+- [Phase 06]: Empty-text guard: InputDialog stays open on Enter with empty text
 
 ### Pending Todos
 
@@ -74,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T01:39:15.118Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-basic-file-operations/06-CONTEXT.md
+Last session: 2026-04-15T02:02:24.694Z
+Stopped at: Completed 06-02-PLAN.md
+Resume file: None
