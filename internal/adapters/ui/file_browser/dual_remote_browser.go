@@ -119,10 +119,11 @@ func (drb *DualRemoteFileBrowser) build() {
 	drb.statusBar.SetTextAlign(tview.AlignCenter)
 	drb.setStatusBarDefault()
 
-	// Build root layout: content + status bar
+	// Build root layout: header + content + status bar
 	drb.SetDirection(tview.FlexRow).
-		AddItem(content, 0, 1, true).      // content takes remaining height
-		AddItem(drb.statusBar, 1, 0, false) // status bar: fixed 1 row
+		AddItem(drb.headerBar, 1, 0, false). // header: fixed 1 row
+		AddItem(content, 0, 1, true).        // content takes remaining height
+		AddItem(drb.statusBar, 1, 0, false)  // status bar: fixed 1 row
 
 	// Set initial focus state (D-03)
 	drb.activePane = 0
