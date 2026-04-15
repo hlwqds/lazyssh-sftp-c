@@ -153,4 +153,4 @@ Full details: .planning/milestones/v1.0-ROADMAP.md, .planning/milestones/v1.1-RO
 | 6. Basic File Operations | v1.2 | 3/3 | Complete | 2026-04-15 |
 | 7. Copy & Clipboard | v1.2 | 2/2 | Complete | 2026-04-15 |
 | 8. Move & Integration | v1.2 | 2/2 | Complete | 2026-04-15 |
-| 9. Dup SSH Connection | v1.3 | 0/1 | Not started | - |
+| 9. Dup SSH Connection | v1.3 | 0/1 | Complete    | 2026-04-15 |

@@ -66,8 +66,8 @@ completed: 2026-04-15
 
 Each task was committed atomically:
 
-1. **Task 1: Implement handleServerDup() and D key routing** - `c533c65` (feat)
-2. **Task 2: Update status bar and server details hints for D key** - `e100fef` (feat)
+1. **Task 1: Implement handleServerDup() and D key routing** - `f7d81d1` (feat)
+2. **Task 2: Update status bar and server details hints for D key** - `f7d81d1` (feat, combined)
 
 ## Files Created/Modified
 - `internal/adapters/ui/handlers.go` - Added handleServerDup(), generateUniqueAlias(), case 'D' routing, dupPendingAlias logic in handleServerSave
@@ -101,8 +101,7 @@ None - no external service configuration required.
 ## Self-Check: PASSED
 
 - FOUND: 09-01-SUMMARY.md
-- FOUND: c533c65 (Task 1 commit)
-- FOUND: e100fef (Task 2 commit)
-- FOUND: 70d4b83 (docs commit)
+- FOUND: f7d81d1 (Task 1 commit)
+- FOUND: f7d81d1 (Task 2 commit, combined)
 - `go build ./...` passes with no errors
 - All 8 verification checks from plan confirmed
