@@ -97,7 +97,12 @@ Plans:
   3. 用户通过 Space 多选文件后按 `d` 键，确认对话框显示待删除文件数量和总大小，确认后批量删除
   4. 用户选中文件/目录后按 `R` 键，弹出输入框预填当前文件名，编辑后 Enter 完成重命名，Esc 取消；目标名称已存在时提示冲突
   5. 用户在任一面板按 `m` 键，弹出输入框输入目录名，Enter 创建子目录，Esc 取消，创建后光标定位到新目录
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md -- FileService port 接口扩展 + SFTPClient/LocalFS adapter 实现
+- [ ] 06-02-PLAN.md -- ConfirmDialog 和 InputDialog overlay 组件
+- [ ] 06-03-PLAN.md -- FileBrowser 集成：按键路由 + delete/rename/mkdir handlers + overlay wiring
 
 ### Phase 7: Copy & Clipboard
 **Goal**: 用户可以通过 c 标记 + p 粘贴在面板内复制文件/目录，剪贴板标记跨目录导航保持
@@ -130,7 +135,7 @@ Phases execute in numeric order: 6 -> 7 -> 8
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 6. Basic File Operations | v1.2 | 0/? | Not started | - |
+| 6. Basic File Operations | v1.2 | 0/3 | Planning complete | - |
 | 7. Copy & Clipboard | v1.2 | 0/? | Not started | - |
 | 8. Move & Integration | v1.2 | 0/? | Not started | - |
 
