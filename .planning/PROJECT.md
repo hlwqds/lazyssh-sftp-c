@@ -8,9 +8,14 @@
 
 在终端内完成 SSH 文件传输和文件管理，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、操作，全部键盘驱动。
 
-## Current Milestone
+## Current Milestone: v1.4 Dup Fix & Dual Remote Transfer
 
-No active milestone. Run `/gsd:new-milestone` to start v1.4.
+**Goal:** 修复 Dup 行为 + 支持两个远端服务器之间的文件互传
+
+**Target features:**
+- Dup 修复：D 键复制后直接出现在列表，不自动打开表单
+- 双远端互传：T 键标记两个服务器，自动打开双远端文件浏览器
+- 双远端浏览器中支持复制/移动文件（复用 c/x + p 机制）
 
 ## Current State
 
@@ -60,11 +65,16 @@ v1.3 shipped 2026-04-15 — Dup SSH 连接功能完整。
 - ✓ 文件/目录复制（c 标记 + p 粘贴，绿色 [C] 前缀）— v1.2
 - ✓ 文件/目录移动（x 标记 + p 粘贴，红色 [M] 前缀，copy+delete）— v1.2
 - ✓ 粘贴冲突对话框（覆盖/跳过/重命名，所有粘贴操作）— v1.2
-- ✓ Dup SSH 连接（D 键复制服务器配置，唯一别名，清除元数据，自动打开编辑表单）— v1.3
+- ✓ Dup SSH 连接（D 键复制服务器配置，唯一别名，清除元数据）— v1.3
 
 ### Active
 
-None — all planned features shipped.
+- [ ] Dup 修复：D 键复制后不自动打开编辑表单，直接出现在列表 — v1.4
+- [ ] T 键标记服务器（源端/目标端），标记两个后自动打开双远端文件浏览器 — v1.4
+- [ ] 双远端文件浏览器（左栏远端 A，右栏远端 B）— v1.4
+- [ ] 双远端之间文件复制/移动（download A → temp → upload B）— v1.4
+- [ ] Esc 清除 T 标记 — v1.4
+- [ ] F 键仍保留本地+远端文件浏览器（现有行为不变）— v1.4
 
 ### Out of Scope
 
@@ -76,14 +86,12 @@ None — all planned features shipped.
 - 路径缩写显示 — v1.x
 - 数字键快速选择 — v1.x
 - 持久化书签/收藏夹 — v2+
-- 跨面板复制/移动（本地→远程=上传，远程→本地=下载）— v2+
 - 文件搜索/过滤 — 独立功能，适合单独 milestone
 - 拖拽排序 — v2+
 - 文件属性编辑（chmod/chown）— v2+
 - 符号链接创建和管理 — v2+
 - 撤销操作 — 实现复杂度高，需要操作日志和逆操作链
-- 本地路径历史持久化 — 延迟到 v1.4
-- 双远端文件互传 — 延迟到 v1.4+
+- 本地路径历史持久化 — 延迟到后续版本
 
 ## Context
 
@@ -94,6 +102,7 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 - v1.1 (2026-04-14): 最近远程目录快速跳转 — MRU 记录 + 弹出列表 (2 phases, 3 plans)
 - v1.2 (2026-04-15): 文件管理操作 — 删除/重命名/新建/复制/移动/冲突对话框 (3 phases, 7 plans)
 - v1.3 (2026-04-15): Dup SSH 连接 — 服务器列表快速复制配置创建新条目 (1 phase, 1 plan)
+- v1.4 (in progress): Dup 修复 + 双远端文件互传
 
 **技术栈：** Go 1.24.6, tview/tcell TUI, Cobra CLI, Zap logging, 系统 SSH/SFTP
 
@@ -135,4 +144,4 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-15 — v1.3 complete*
+*Last updated: 2026-04-15 — v1.4 started*

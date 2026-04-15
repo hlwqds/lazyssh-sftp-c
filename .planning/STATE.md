@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: idle
-stopped_at: v1.3 milestone completed
-last_updated: "2026-04-15T13:15:00.000Z"
+milestone: v1.4
+milestone_name: Dup Fix & Dual Remote Transfer
+status: defining-requirements
+stopped_at: Defining requirements
+last_updated: "2026-04-15T13:20:00.000Z"
 last_activity: 2026-04-15
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、传输，全部键盘驱动。
-**Current focus:** Planning next milestone (run `/gsd:new-milestone`)
+**Current focus:** v1.4 — Dup Fix & Dual Remote Transfer
 
 ## Current Position
 
-Phase: -
-Plan: -
-Status: Milestone v1.3 complete — ready for next milestone
-Last activity: 2026-04-15
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-15 — Milestone v1.4 started
 
-Progress: [██████████] 100%
+Progress: [░░░░░░░░░░] 0%
 
 ## Accumulated Context
 
@@ -48,6 +48,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T13:15:00.000Z
-Stopped at: v1.3 milestone completed
+Last session: 2026-04-15T13:20:00.000Z
+Stopped at: Defining requirements
 Resume file: None
