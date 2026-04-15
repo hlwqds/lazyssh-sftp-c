@@ -100,7 +100,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- FileService port 接口扩展 + SFTPClient/LocalFS adapter 实现
+- [x] 06-01-PLAN.md -- FileService port 接口扩展 + SFTPClient/LocalFS adapter 实现
 - [ ] 06-02-PLAN.md -- ConfirmDialog 和 InputDialog overlay 组件
 - [ ] 06-03-PLAN.md -- FileBrowser 集成：按键路由 + delete/rename/mkdir handlers + overlay wiring
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 6 -> 7 -> 8
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 6. Basic File Operations | v1.2 | 0/3 | Planning complete | - |
+| 6. Basic File Operations | v1.2 | 1/3 | In Progress|  |
 | 7. Copy & Clipboard | v1.2 | 0/? | Not started | - |
 | 8. Move & Integration | v1.2 | 0/? | Not started | - |
 
