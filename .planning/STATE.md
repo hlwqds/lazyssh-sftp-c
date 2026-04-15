@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Dup Fix & Dual Remote Transfer
-status: ready-to-plan
-stopped_at: Roadmap created
-last_updated: "2026-04-15T14:00:00.000Z"
-last_activity: 2026-04-15
+status: completed
+stopped_at: Completed 10-01-PLAN.md
+last_updated: "2026-04-15T15:10:23.516Z"
+last_activity: 2026-04-15 — Phase 10 dup fix executed
 progress:
-  total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 22
-  percent: 53
+  total_phases: 13
+  completed_phases: 5
+  total_plans: 9
+  completed_plans: 9
+  percent: 100
 ---
 
 # Project State
@@ -26,15 +26,16 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 10 of 13 (Dup Fix)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-04-15 — v1.4 roadmap created
+Plan: 1 of 1 complete
+Status: Phase 10 complete
+Last activity: 2026-04-15 — Phase 10 dup fix executed
 
-Progress: [████████████████████░░░░░░░░░░░░░░] 53%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 22 (v1.0-v1.3)
 - Total phases completed: 9
 
@@ -49,6 +50,7 @@ Progress: [████████████████████░░░
 | 10-13 (v1.4) | TBD | Not started |
 
 *Updated after each plan completion*
+| Phase 10 P01 | 2min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -61,6 +63,7 @@ Recent decisions affecting current work:
 - **Phase 11:** 标记状态存储在 tui struct 而非 ServerList，因需跨组件访问
 - **Phase 12:** DualRemoteFileBrowser 独立组件（不复用 FileBrowser），避免 15+ activePane 二元假设
 - **Phase 13:** RelayTransferService 组合两个 transfer.New() 实例，零代码重复
+- [Phase 10]: handleServerDup directly calls AddServer() after deep copy, bypassing ServerForm
 
 ### Pending Todos
 
@@ -73,6 +76,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T14:00:00.000Z
-Stopped at: v1.4 roadmap created, ready for Phase 10 planning
+Last session: 2026-04-15T15:10:23.512Z
+Stopped at: Completed 10-01-PLAN.md
 Resume file: None

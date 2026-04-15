@@ -161,7 +161,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 10-01: Rewrite handleServerDup() for direct save with search-aware positioning + dupPendingAlias cleanup
+- [x] 10-01: Rewrite handleServerDup() for direct save with search-aware positioning + dupPendingAlias cleanup
 **UI hint**: yes
 
 ### Phase 11: T Key Marking
@@ -217,7 +217,7 @@ Phases execute in numeric order: 10 -> 11 -> 12 -> 13
 | 7. Copy & Clipboard | v1.2 | 2/2 | Complete | 2026-04-15 |
 | 8. Move & Integration | v1.2 | 2/2 | Complete | 2026-04-15 |
 | 9. Dup SSH Connection | v1.3 | 1/1 | Complete | 2026-04-15 |
-| 10. Dup Fix | v1.4 | 0/1 | Not started | - |
+| 10. Dup Fix | v1.4 | 1/1 | Complete   | 2026-04-15 |
 | 11. T Key Marking | v1.4 | 0/? | Not started | - |
 | 12. Dual Remote Browser | v1.4 | 0/? | Not started | - |
 | 13. Cross-Remote Transfer | v1.4 | 0/? | Not started | - |

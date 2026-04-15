@@ -7,8 +7,8 @@
 
 ### Dup Fix
 
-- [ ] **DUP-FIX-01**: D 键复制后直接调用 AddServer() 添加新条目到列表，不自动打开 ServerForm 编辑表单
-- [ ] **DUP-FIX-02**: 复制后自动滚动列表到新条目（复用现有 dupPendingAlias 滚动逻辑）
+- [x] **DUP-FIX-01**: D 键复制后直接调用 AddServer() 添加新条目到列表，不自动打开 ServerForm 编辑表单
+- [x] **DUP-FIX-02**: 复制后自动滚动列表到新条目（复用现有 dupPendingAlias 滚动逻辑）
 
 ### T Key Marking
 
@@ -50,8 +50,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DUP-FIX-01 | Phase 10 | Pending |
-| DUP-FIX-02 | Phase 10 | Pending |
+| DUP-FIX-01 | Phase 10 | Complete |
+| DUP-FIX-02 | Phase 10 | Complete |
 | MARK-01 | Phase 11 | Pending |
 | MARK-02 | Phase 11 | Pending |
 | MARK-03 | Phase 11 | Pending |
