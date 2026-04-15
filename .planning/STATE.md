@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: File Operations
-status: verifying
-stopped_at: Phase 8 context gathered
-last_updated: "2026-04-15T07:06:28.309Z"
+status: executing
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-04-15T07:59:44.827Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 8
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 7
+  completed_plans: 6
   percent: 38
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在终端内完成 SSH 文件传输，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、传输，全部键盘驱动。
-**Current focus:** Phase 07 — copy-clipboard
+**Current focus:** Phase 08 — move-integration
 
 ## Current Position
 
-Phase: 07 (copy-clipboard) — EXECUTING
+Phase: 08 (move-integration) — EXECUTING
 Plan: 2 of 2
-Status: Phase complete — ready for verification
+Status: Ready to execute
 Last activity: 2026-04-15
 
 Progress: [████████████░░░░░░░░░░] 38% (5/8 phases shipped)
@@ -55,6 +55,7 @@ Progress: [████████████░░░░░░░░░░] 3
 | Phase 06 P03 | 290s | 3 tasks | 2 files |
 | Phase 07 P01 | 6min | 2 tasks | 7 files |
 | Phase 07 P02 | 9min | 2 tasks | 5 files |
+| Phase 08 P01 | 473 | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,9 @@ Recent decisions affecting current work:
 - [Phase 07]: clipboardProvider callback pattern: panes query clipboard state via func() (bool, string, string) to avoid coupling to FileBrowser
 - [Phase 07]: Remote dir copy uses DownloadDir+UploadDir separately for phase-specific progress labels (D-08)
 - [Phase 07]: Esc priority chain: TransferModal > clipboard > close browser
+- [Phase 08]: clipboardProvider extended to 4-tuple (bool, string, string, ClipboardOp) for [M]/[C] prefix distinction
+- [Phase 08]: modeMove reuses drawProgress render path identically to modeCopy
+- [Phase 08]: [M] uses red (#FF6B6B) to visually distinguish from [C] green (#00FF7F)
 
 ### Pending Todos
 
@@ -91,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T07:06:28.307Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-move-integration/08-CONTEXT.md
+Last session: 2026-04-15T07:59:44.825Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
