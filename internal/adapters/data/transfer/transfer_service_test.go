@@ -126,6 +126,14 @@ func (m *mockSFTPService) Mkdir(path string) error {
 	return nil
 }
 
+func (m *mockSFTPService) Copy(src, dst string) error {
+	return nil
+}
+
+func (m *mockSFTPService) CopyDir(src, dst string) error {
+	return nil
+}
+
 func (m *mockSFTPService) HomeDir() string {
 	return "/home/test"
 }

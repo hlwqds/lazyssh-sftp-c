@@ -51,6 +51,14 @@ func (m *mockFileService) Stat(path string) (os.FileInfo, error) {
 	return nil, fmt.Errorf("not found")
 }
 
+func (m *mockFileService) Copy(src, dst string) error {
+	return nil
+}
+
+func (m *mockFileService) CopyDir(src, dst string) error {
+	return nil
+}
+
 // mockSFTPService is a minimal mock implementing SFTPService for compilation verification.
 type mockSFTPService struct {
 	mockFileService
