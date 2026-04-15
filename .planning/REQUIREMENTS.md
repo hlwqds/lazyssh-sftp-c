@@ -50,29 +50,29 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DUP-FIX-01 | TBD | Pending |
-| DUP-FIX-02 | TBD | Pending |
-| MARK-01 | TBD | Pending |
-| MARK-02 | TBD | Pending |
-| MARK-03 | TBD | Pending |
-| MARK-04 | TBD | Pending |
-| MARK-05 | TBD | Pending |
-| DRB-01 | TBD | Pending |
-| DRB-02 | TBD | Pending |
-| DRB-03 | TBD | Pending |
-| DRB-04 | TBD | Pending |
-| XFR-01 | TBD | Pending |
-| XFR-02 | TBD | Pending |
-| XFR-03 | TBD | Pending |
-| XFR-04 | TBD | Pending |
-| XFR-05 | TBD | Pending |
-| XFR-06 | TBD | Pending |
-| XFR-07 | TBD | Pending |
+| DUP-FIX-01 | Phase 10 | Pending |
+| DUP-FIX-02 | Phase 10 | Pending |
+| MARK-01 | Phase 11 | Pending |
+| MARK-02 | Phase 11 | Pending |
+| MARK-03 | Phase 11 | Pending |
+| MARK-04 | Phase 11 | Pending |
+| MARK-05 | Phase 11 | Pending |
+| DRB-01 | Phase 12 | Pending |
+| DRB-02 | Phase 12 | Pending |
+| DRB-03 | Phase 12 | Pending |
+| DRB-04 | Phase 12 | Pending |
+| XFR-01 | Phase 13 | Pending |
+| XFR-02 | Phase 13 | Pending |
+| XFR-03 | Phase 13 | Pending |
+| XFR-04 | Phase 13 | Pending |
+| XFR-05 | Phase 13 | Pending |
+| XFR-06 | Phase 13 | Pending |
+| XFR-07 | Phase 13 | Pending |
 
 **Coverage:**
-- v1.4 requirements: 17 total
-- Mapped to phases: 0/17 (roadmap not yet created)
-- Unmapped: 17
+- v1.4 requirements: 18 total
+- Mapped to phases: 18/18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-15*
