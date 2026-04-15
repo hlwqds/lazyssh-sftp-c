@@ -1,602 +1,865 @@
-# Architecture Research: Recent Remote Directories Integration
+# Architecture Research: File Operations Integration (v1.2)
 
-**Domain:** TUI Overlay Component for FileBrowser (v1.1 Milestone)
-**Researched:** 2026-04-14
-**Confidence:** HIGH (based on direct code analysis of existing file_browser package)
+**Domain:** TUI File Management Operations for FileBrowser
+**Researched:** 2026-04-15
+**Confidence:** HIGH (based on direct code analysis of all file_browser package files, ports, adapters, and domain layer)
 
 ## Executive Summary
 
-"Recent Remote Directories" feature is a pure UI-layer addition that follows the same overlay pattern established by `TransferModal`. The integration requires one new struct (`RecentDirs`), modifications to two existing files (`file_browser.go`, `remote_pane.go`), and zero changes to domain/ports/services layers. The feature is well-scoped: in-memory ring buffer of path strings, triggered by `r` key in RemotePane, displayed as a tview.Box overlay with manual Draw.
+v1.2 file operations (delete, rename, mkdir, copy, move) integrate into the existing Clean Architecture through a three-layer expansion: (1) port interface additions to `FileService`, (2) adapter implementations in `LocalFS` and `SFTPClient`, (3) new overlay UI components following the established `TransferModal`/`RecentDirs` pattern.
 
-The most architecturally significant finding is the `onPathChange` callback asymmetry: `NavigateInto()` fires the callback but `NavigateToParent()` does not. Recording recent paths requires either fixing this asymmetry or hooking into a central point in FileBrowser.
+The most architecturally significant finding is the clipboard/marking state management problem. Copy (`c`) and move (`x`) are two-step operations (mark source, navigate to destination, paste) that cross pane boundaries. This state must live in `FileBrowser` -- the only component with visibility into both panes. A simple `Clipboard` struct with `SourcePane`, `SourcePath`, `Operation`, and `SourceFiles` fields is sufficient.
 
-## Existing Architecture: Component Map
+All file management operations should be **synchronous for simple operations** (delete single file, rename, mkdir) and **asynchronous with progress for bulk operations** (recursive delete, copy/move directories). The async pattern follows the existing `initiateTransfer()` goroutine + `QueueUpdateDraw()` model.
+
+## Existing Architecture: Current Component Map
 
 ```
 FileBrowser (root, *tview.Flex)
   ├── localPane  (*LocalPane = *tview.Table)
   ├── remotePane (*RemotePane = *tview.Table)
   ├── statusBar  (*tview.TextView)
-  └── transferModal (*TransferModal = *tview.Box, overlay)
+  ├── transferModal (*TransferModal = *tview.Box, overlay)
+  └── recentDirs    (*RecentDirs = *tview.Box, overlay)
 ```
 
-### Key Ownership Relationships
-
-| Owner | Component | Lifecycle |
-|-------|-----------|-----------|
-| FileBrowser | localPane | Created in build(), never replaced |
-| FileBrowser | remotePane | Created in build(), never replaced |
-| FileBrowser | transferModal | Created in build(), shown/hidden via Show()/Hide() |
-| FileBrowser | statusBar | Created in build(), text updated dynamically |
-
-### Key Routing Chain
+### Existing Key Routing Chain
 
 ```
-Keyboard event propagation:
+Keyboard event propagation (v1.1):
   FileBrowser.SetInputCapture (handleGlobalKeys)
-    → Tab, Esc, s, S, F5 intercepted
+    → Overlay visibility check: recentDirs intercepts all keys when visible
+    → Esc: transferModal.HandleKey() or close
+    → Tab: switchFocus()
+    → F5: initiateDirTransfer()
+    → r (remote pane): recentDirs.Show()
+    → s/S: sort controls
     → event passed to focused pane
 
-  RemotePane.SetInputCapture
-    → h, Space, . intercepted (when connected)
+  Pane.SetInputCapture (local_pane.go / remote_pane.go)
+    → h: NavigateToParent()
+    → Space: ToggleSelection()
+    → . : ToggleHidden()
+    → Backspace: NavigateToParent()
     → event passed to Table built-in (j/k/arrows/Enter/PgUp/PgDn)
 
-  RemotePane.SetSelectedFunc (Enter on row)
+  Pane.SetSelectedFunc (Enter on row)
     → NavigateInto() for directories
-    → onFileAction callback for files
+    → onFileAction callback for files (triggers initiateTransfer)
 ```
 
-### Overlay Pattern (TransferModal as Reference)
+### Existing Overlay Pattern (TransferModal + RecentDirs as Reference)
 
-TransferModal is the only existing overlay in FileBrowser. Its pattern:
+Both overlays follow the same pattern:
 
-1. **Embeds `*tview.Box`** (not a full tview.Primitive with InputHandler)
-2. **Manual `Draw()`** with `visible` flag guard
-3. **No tview focus** -- key interception happens in `handleGlobalKeys`:
+1. **Embed `*tview.Box`** (not a full tview.Primitive with InputHandler)
+2. **Manual `Draw(screen tcell.Screen)`** with `visible` flag guard
+3. **No tview focus** -- key interception in `FileBrowser.handleGlobalKeys()`:
    ```go
-   // file_browser_handlers.go line 37-39
-   case tcell.KeyESC:
-       if fb.transferModal != nil && fb.transferModal.IsVisible() {
-           fb.transferModal.HandleKey(event)
-           return nil
-       }
+   // Overlay key interception: check BEFORE any other key handling
+   if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
+       return fb.recentDirs.HandleKey(event)
+   }
    ```
-4. **State machine** via `modalMode` enum (progress/cancelConfirm/conflictDialog/summary)
-5. **Dismiss callback** for cleanup after hide
+4. **Draw chain** in `FileBrowser.Draw()`:
+   ```go
+   func (fb *FileBrowser) Draw(screen tcell.Screen) {
+       fb.Flex.Draw(screen)
+       if fb.transferModal != nil && fb.transferModal.IsVisible() {
+           fb.transferModal.Draw(screen)
+       }
+       if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
+           fb.recentDirs.Draw(screen)
+       }
+   }
+   ```
+5. **State machine** via enum (`modalMode` for TransferModal)
+6. **Dismiss callback** for cleanup after hide
 
-This pattern is the blueprint for the RecentDirs overlay.
+**v1.2 overlay components must follow this exact pattern.**
 
-## New Component: RecentDirs
+## Architecture for v1.2 File Operations
 
-### Component Design
+### Updated Component Map
 
 ```
-RecentDirs (new struct)
-  ├── *tview.Box (background, border, title)
-  ├── paths []string (ring buffer, max 10)
-  ├── selectedIndex int (cursor position)
-  ├── visible bool
-  └── onDismiss func()
+FileBrowser (root, *tview.Flex)
+  ├── localPane      (*LocalPane = *tview.Table)
+  ├── remotePane     (*RemotePane = *tview.Table)
+  ├── statusBar      (*tview.TextView)
+  ├── transferModal  (*TransferModal = *tview.Box, overlay)
+  ├── recentDirs     (*RecentDirs = *tview.Box, overlay)
+  ├── confirmDialog  (*ConfirmDialog = *tview.Box, overlay)  ← NEW
+  ├── inputDialog    (*InputDialog = *tview.Box, overlay)    ← NEW
+  └── clipboard      (*Clipboard)                            ← NEW (pure state, no UI)
 ```
 
-**File location:** `internal/adapters/ui/file_browser/recent_dirs.go`
+### Layer 1: Port Interface Changes
 
-### Why a New Struct (Not Extending RemotePane)
+#### FileService Interface Expansion
+
+The critical design decision is **promoting shared operations to `FileService`**. Currently, `Remove` and `Stat` are only in `SFTPService`. For v1.2, both local and remote panes need delete, rename, mkdir, and stat. Rather than doing `if local then os.Remove else sftp.Remove` in the UI layer, we promote these to the shared `FileService` interface:
+
+```go
+// FileService provides file listing and management operations for local and remote filesystems.
+type FileService interface {
+    // --- Existing (v1.0) ---
+    ListDir(path string, showHidden bool, sortField domain.FileSortField, sortAsc bool) ([]domain.FileInfo, error)
+
+    // --- v1.2 Additions ---
+    Remove(path string) error
+    RemoveAll(path string) error
+    Rename(oldPath, newPath string) error
+    Mkdir(path string) error
+    Stat(path string) (os.FileInfo, error)
+}
+```
+
+**Why `Remove` and `Stat` move from SFTPService to FileService:**
+- Both local and remote panes need identical operations
+- UI layer should not do type assertions or `if/else` based on pane identity
+- `SFTPService` embeds `FileService`, so it still has these methods -- no behavior change
+- Compile-time safety: both `LocalFS` and `SFTPClient` must implement all methods
+
+**Why `Mkdir` is separate from `MkdirAll`:**
+- `Mkdir` creates a single directory and fails if parent doesn't exist -- appropriate for "new directory" UI where we want to catch typos
+- `MkdirAll` creates recursively -- appropriate for transfer service where intermediate directories must exist
+- Different semantics for different use cases
+
+**Why NOT `CopyFile`/`CopyDir` in FileService:**
+- Copy is a heavy I/O operation needing `context.Context`, progress callbacks, and conflict handling
+- These requirements match `TransferService`'s interface pattern (see CopyService below)
+- Mixing simple CRUD (`Remove`, `Rename`, `Mkdir`) with streaming I/O (`CopyFile`) violates interface segregation
+
+#### New CopyService Interface
+
+```go
+// CopyService provides copy operations within a single filesystem.
+// Cross-pane copy (local-to-remote, remote-to-local) uses existing TransferService.
+type CopyService interface {
+    CopyFile(ctx context.Context, srcPath, dstPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) error
+    CopyDir(ctx context.Context, srcPath, dstPath string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
+}
+```
+
+**Why a separate CopyService rather than extending FileService:**
+- `context.Context` for cancellation (not needed for `Remove`/`Rename`/`Mkdir`)
+- `onProgress` callback (heavy I/O vs instant operations)
+- `onConflict` callback (copy can conflict, rename/mkdir don't)
+- Interface Segregation Principle: FileService callers don't need progress callbacks
+
+#### SFTPService After Refactoring
+
+```go
+type SFTPService interface {
+    FileService  // inherits ListDir, Remove, RemoveAll, Rename, Mkdir, Stat
+
+    // Connection lifecycle (unchanged)
+    Connect(server domain.Server) error
+    Close() error
+    IsConnected() bool
+    HomeDir() string
+
+    // Remote I/O (unchanged)
+    CreateRemoteFile(path string) (io.WriteCloser, error)
+    OpenRemoteFile(path string) (io.ReadCloser, error)
+    WalkDir(path string) ([]string, error)
+}
+```
+
+Note: `Remove` and `Stat` are no longer declared directly on `SFTPService` -- they come from `FileService`. Behavior is identical. Existing code that calls `sftpService.Remove()` or `sftpService.Stat()` continues to work unchanged.
+
+### Layer 2: Adapter Implementations
+
+#### SFTPClient New Methods
+
+All methods follow the existing mutex pattern: `c.mu.Lock()` -> acquire `c.client` -> `c.mu.Unlock()`.
+
+| Method | Implementation | pkg/sftp API |
+|--------|---------------|-------------|
+| `RemoveAll(path)` | `client.RemoveAll(path)` | SSH_FXP_REMOVE (recursive via library) |
+| `Rename(old, new)` | `client.Rename(old, new)` | SSH_FXP_RENAME |
+| `Mkdir(path)` | `client.Mkdir(path)` | SSH_FXP_MKDIR |
+| `Stat(path)` | **already implemented** | SSH_FXP_LSTAT |
+| `Remove(path)` | **already implemented** | SSH_FXP_REMOVE |
+
+**Existing methods that need no changes:** `Remove`, `Stat`, `MkdirAll`, `CreateRemoteFile`, `OpenRemoteFile`, `WalkDir`.
+
+#### LocalFS New Methods
+
+| Method | Implementation |
+|--------|---------------|
+| `Remove(path)` | `os.Remove(path)` |
+| `RemoveAll(path)` | `os.RemoveAll(path)` |
+| `Rename(old, new)` | `os.Rename(old, new)` |
+| `Mkdir(path)` | `os.Mkdir(path, 0o750)` |
+| `Stat(path)` | `os.Stat(path)` |
+
+All are one-line proxies. No error wrapping beyond `fmt.Errorf`.
+
+#### CopyService Implementations
+
+Two adapters needed:
+
+**1. `LocalCopyService`** (`internal/adapters/data/local_fs/local_copy.go`)
+- Uses `os.Open` + `os.Create` + 32KB buffer
+- Reuses the `copyWithProgress` pattern from `transfer_service.go`
+- For `CopyDir`: uses `filepath.WalkDir` to enumerate, creates directories via `os.MkdirAll`
+
+**2. `RemoteCopyService`** (`internal/adapters/data/sftp_client/remote_copy.go`)
+- Uses `sftpService.OpenRemoteFile` + `sftpService.CreateRemoteFile` + 32KB buffer
+- For `CopyDir`: uses `sftpService.WalkDir` to enumerate, creates directories via `sftpService.MkdirAll`
+- Depends on `ports.SFTPService` for I/O operations
+
+**Design decision: Extract `copyWithProgress` as a shared utility.**
+
+The `copyWithProgress` function in `transfer/transfer_service.go` (lines 436-485) is identical for local-to-local and remote-to-remote copies. Options:
 
 | Approach | Pros | Cons |
 |----------|------|------|
-| **New struct (Recommended)** | Clean separation; follows TransferModal precedent; no pane code bloat; easily testable | One more file in package |
-| Add to RemotePane | No new file | Violates single responsibility; RemotePane is already 425 lines; mixes display concerns with file browsing; overlay focus model fundamentally different |
-| Add to FileBrowser | Centralized | FileBrowser is already 570 lines; couples overlay rendering to layout orchestration |
+| **Extract to `internal/core/services/copy.go`** (Recommended) | Shared code, single implementation, tested once | Adds a file to core/services (currently only server_service.go) |
+| Duplicate in each CopyService | No shared dependency | 3 copies of the same code |
+| Keep in transfer package, import from copy | Minimal change | Circular dependency risk if copy imports transfer types |
 
-**Recommendation:** New `RecentDirs` struct following the TransferModal pattern exactly.
+**Recommendation:** Extract `copyWithProgress` to `internal/core/services/copy.go`. Both `transfer.TransferService` and the two `CopyService` implementations import it. The function is pure I/O with no domain coupling -- it belongs in services, not adapters.
 
-### Data Storage: Where Paths Live
+### Layer 3: UI Components
 
-**Recommendation: Paths stored in `RecentDirs` struct, owned by `FileBrowser`.**
+#### New Overlay: ConfirmDialog
+
+Used for delete confirmation and dangerous operations.
 
 ```
-FileBrowser
-  ├── ...
-  └── recentDirs *RecentDirs  (NEW field)
+ConfirmDialog (new struct)
+  ├── *tview.Box (background, border, title)
+  ├── message string
+  ├── visible bool
+  ├── onConfirm func()
+  ├── onCancel func()
+  └── mode confirmMode (confirm/cancel)
 ```
 
-Rationale:
-- RecentDirs owns its data, just like TransferModal owns its progress state
-- No need for a separate data structure -- it's a simple `[]string` ring buffer
-- Per PROJECT.md: "Only in memory, cleared on exit" -- no persistence needed
-- Per PROJECT.md: "Granularity: local dir + server combination" -- since FileBrowser is per-server, one RecentDirs instance per FileBrowser session is correct
+**File location:** `internal/adapters/ui/file_browser/confirm_dialog.go`
 
-**Why NOT in RemotePane:**
-- RemotePane is a table view for displaying files. Path history is a separate concern.
-- The overlay is displayed on top of the entire FileBrowser, not just the RemotePane area.
-- RemotePane doesn't own any overlay state currently (TransferModal is owned by FileBrowser).
+**Draw layout:**
+```
+┌─────────────────────────────┐
+│  Confirm Delete             │
+│                             │
+│  Delete "filename.txt"?     │
+│  (directory: recursively)   │
+│                             │
+│  [y] Yes  [n] No            │
+│  Press Esc to cancel        │
+└─────────────────────────────┘
+```
 
-### Ring Buffer Implementation
+**HandleKey dispatch:**
+- `y` / `Enter` -> call `onConfirm`, `Hide()`
+- `n` / `Esc` -> call `onCancel`, `Hide()`
+- All other keys -> consumed (return nil)
+
+**Pattern reference:** Follows `TransferModal.modeCancelConfirm` but as a standalone component. The cancel-confirm in TransferModal is embedded in a multi-mode state machine; a standalone `ConfirmDialog` is cleaner for delete/rename confirmations.
+
+#### New Overlay: InputDialog
+
+Used for rename and mkdir (any operation needing user text input).
+
+```
+InputDialog (new struct)
+  ├── *tview.Box (background, border, title)
+  ├── inputField *tview.InputField (embedded tview widget)
+  ├── visible bool
+  ├── onSubmit func(value string)
+  ├── onCancel func()
+  └── mode inputMode (rename/mkdir)
+```
+
+**File location:** `internal/adapters/ui/file_browser/input_dialog.go`
+
+**Draw layout:**
+```
+┌─────────────────────────────────┐
+│  Rename                         │
+│                                 │
+│  New name: [filename_new.txt__] │
+│                                 │
+│  [Enter] Confirm  [Esc] Cancel  │
+└─────────────────────────────────┘
+```
+
+**Key design decision: tview.InputField vs manual text editing.**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **tview.InputField embedded in Box** (Recommended) | Handles cursor movement, text selection, character input; battle-tested; used in ServerForm | Needs focus management within overlay |
+| Manual text buffer + Draw | Full control over rendering | Re-implementing cursor, text editing, Unicode handling -- high effort for no benefit |
+
+**Recommendation:** Embed `tview.InputField` in the overlay Box. The InputField is a proper tview.Primitive with its own InputHandler. Key routing:
+
+1. When `InputDialog` is visible, `handleGlobalKeys` delegates to `InputDialog.HandleKey()`
+2. `InputDialog.HandleKey()` routes to `inputField.InputHandler()` for text editing
+3. `Enter` triggers `onSubmit`, `Esc` triggers `onCancel`
+
+**Focus management challenge:** `tview.InputField` expects to receive focus via `app.SetFocus()`. But overlays use manual key interception, not tview focus. Solution: call `inputField.InputHandler(event, func(p tview.Primitive) { ... })` directly in `InputDialog.HandleKey()`, bypassing tview's focus system. The callback from InputHandler is ignored (we don't change focus).
 
 ```go
-const maxRecentDirs = 10
-
-type RecentDirs struct {
-    *tview.Box
-    paths         []string // most-recent first
-    selectedIndex int
-    visible       bool
-    onNavigate    func(path string) // callback when user selects a path
-    onDismiss     func()
-}
-
-// Record adds a path to the front of the list.
-// Deduplicates: moves existing path to front if already present.
-// Trims to maxRecentDirs.
-func (rd *RecentDirs) Record(path string) { ... }
-```
-
-The `Record` method implements move-to-front deduplication:
-- If path exists in list, remove it from current position
-- Insert at front
-- Trim to 10 entries
-
-This is pure UI state -- no domain/ports changes needed.
-
-## Integration Points
-
-### 1. Key Routing: 'r' Key Interception
-
-**Where:** `RemotePane.SetInputCapture` (NOT `FileBrowser.SetInputCapture`)
-
-**Why RemotePane:**
-- The `r` key should only work when RemotePane has focus
-- This matches the existing pattern: pane-specific keys (`h`, Space, `.`) are intercepted in `RemotePane.SetInputCapture`
-- FileBrowser-level keys (`Tab`, `Esc`, `s`, `S`) are in `handleGlobalKeys`
-- However, RemotePane doesn't have access to `recentDirs` -- it needs a callback
-
-**Two options for the callback:**
-
-**Option A: Callback from RemotePane to FileBrowser (Recommended)**
-```go
-// RemotePane gets a new callback
-onShowRecentDirs func()
-
-// In RemotePane.SetInputCapture:
-case 'r':
-    if rp.onShowRecentDirs != nil {
-        rp.onShowRecentDirs()
+func (id *InputDialog) HandleKey(event *tcell.EventKey) *tcell.EventKey {
+    if !id.visible {
+        return event
     }
-    return nil
-```
-
-This follows the exact same pattern as `onPathChange` and `onFileAction` -- RemotePane defines callback slots, FileBrowser wires them in `build()`.
-
-**Option B: Intercept in FileBrowser.handleGlobalKeys**
-```go
-// In handleGlobalKeys:
-case 'r':
-    if fb.activePane == 1 && fb.remotePane.IsConnected() {
-        fb.recentDirs.Show()
+    // Route all keys to InputField for text editing
+    id.inputField.InputHandler(event, func(tview.Primitive) {})
+    // Check if Enter was pressed (InputField handles it)
+    if event.Key() == tcell.KeyEnter {
+        id.onSubmit(id.inputField.GetText())
+        id.Hide()
         return nil
     }
-```
-
-This is simpler but breaks the established pattern. Pane-specific keys live in pane InputCapture.
-
-**Recommendation:** Option A. It maintains the established pattern where panes define their own key bindings via callbacks.
-
-### 2. Recording Paths: Hook into Navigation
-
-**Critical finding:** There is an existing asymmetry in `onPathChange`:
-
-| Method | Fires onPathChange? |
-|--------|-------------------|
-| `RemotePane.NavigateInto()` | YES (line 298-299) |
-| `RemotePane.NavigateToParent()` | **NO** |
-
-Both methods change `rp.currentPath`, but only `NavigateInto` fires the callback. This is a bug or intentional omission -- it means `app.Sync()` (which uses `onPathChange`) is also not called on parent navigation.
-
-**Recording strategy:** Hook into the `onPathChange` callback that FileBrowser already registers on RemotePane.
-
-```go
-// In FileBrowser.build():
-fb.remotePane.OnPathChange(func(path string) {
-    fb.app.Sync()                          // existing
-    fb.recentDirs.Record(path)             // NEW
-})
-```
-
-**This approach also means NavigateToParent won't record paths.** Two options:
-
-**Option A: Fix the asymmetry (Recommended)**
-Add `onPathChange` call to `NavigateToParent()` in RemotePane. This is arguably a bug fix -- the path does change, so the callback should fire. It also fixes the missing `app.Sync()` on parent navigation.
-
-```go
-func (rp *RemotePane) NavigateToParent() {
-    // ... existing code ...
-    rp.currentPath = parent
-    rp.selected = make(map[string]bool)
-    rp.Refresh()
-    if rp.onPathChange != nil {        // ADD THIS
-        rp.onPathChange(rp.currentPath) // ADD THIS
+    if event.Key() == tcell.KeyEscape {
+        id.onCancel()
+        id.Hide()
+        return nil
     }
+    return nil // consume all keys when visible
 }
 ```
 
-**Option B: Add a separate callback for recording**
-A new `onRecordPath` callback that both `NavigateInto` and `NavigateToParent` call. More verbose, unnecessary if the asymmetry is a bug.
-
-**Recommendation:** Option A. Fix the asymmetry. It's a one-line change that also improves existing behavior (Sync on parent nav).
-
-### 3. Display: Overlay Rendering
-
-The RecentDirs overlay renders on top of the FileBrowser, similar to TransferModal but simpler.
-
-**Approach: Manual Draw via AfterDrawFunc (NOT replacing root)**
-
-TransferModal uses a different approach -- it doesn't use `app.SetRoot()`. Instead, it renders during the normal draw cycle because `FileBrowser.Draw()` calls `fb.Flex.Draw()` which draws children, and the modal's `Draw()` is called via... wait, let me re-examine.
-
-Actually, looking more carefully: TransferModal is NOT added as a child of the Flex layout. It renders via the `SetAfterDrawFunc` mechanism. Let me trace the actual draw path.
-
-**Correction:** TransferModal's `Draw()` method is called by... actually it's not automatically called. Looking at the code, the TransferModal is not added to the Flex layout at all. It must be drawn via a custom mechanism.
-
-Let me re-examine. The `handleGlobalKeys` intercepts Esc and calls `fb.transferModal.HandleKey(event)`. The modal's `Show()` sets `visible = true`. But how does `Draw()` get called?
-
-**The answer is: TransferModal.Draw() is likely called through a custom draw mechanism.** Looking at `FileBrowser.Draw()`:
+**Wait -- there's a subtlety.** `tview.InputField` handles `Enter` internally via `doneFunc`. If we set a `doneFunc` on the InputField, it fires on Enter. We should NOT also check for Enter in HandleKey -- that would double-fire. The correct approach:
 
 ```go
-func (fb *FileBrowser) Draw(screen tcell.Screen) {
-    // Fill background
-    fb.Flex.Draw(screen)
-}
-```
-
-TransferModal is not drawn here. It must be rendered through a separate mechanism. Since it's not added to the Flex children and there's no explicit draw call for it in FileBrowser.Draw(), the actual rendering path needs the modal to be drawn somehow.
-
-**Revised approach for RecentDirs:** Use `app.SetRoot()` to temporarily replace the root with a wrapper that draws both FileBrowser and RecentDirs. OR use the same mechanism TransferModal uses.
-
-Actually, the simplest approach that matches the existing pattern: render the RecentDirs list as a **tview.Form or tview.List** modal that gets set as root temporarily (like `showDeleteConfirmModal` in handlers.go does with `tview.NewModal()`).
-
-But this doesn't match the TransferModal pattern. Let me reconsider.
-
-**Best approach: Use `app.SetRoot()` with a wrapper Flex.**
-
-```go
-func (fb *FileBrowser) showRecentDirs() {
-    wrapper := tview.NewFlex().SetDirection(tview.FlexRow)
-    wrapper.SetBackgroundColor(tcell.ColorDefault)
-    wrapper.AddItem(fb, 0, 1, false)  // FileBrowser as background
-
-    rdList := fb.recentDirs.BuildList()  // returns a tview.Primitive
-    wrapper.AddItem(rdList, 0, 0, true) // overlay on top
-
-    fb.app.SetRoot(wrapper, true)
-    fb.app.SetFocus(rdList)
-}
-```
-
-Wait -- this won't work well because tview.Flex distributes space proportionally, not as an overlay.
-
-**Alternative: Draw the RecentDirs as an overlay in FileBrowser.Draw()**
-
-```go
-func (fb *FileBrowser) Draw(screen tcell.Screen) {
-    fb.Flex.Draw(screen)
-    // Draw overlay on top
-    if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
-        fb.recentDirs.Draw(screen)
-    }
-}
-```
-
-This is the cleanest approach and exactly how overlay modals work in tview. The overlay draws on top of the Flex content. TransferModal likely uses this same approach (its `Draw()` method is structured for this).
-
-**Key insight:** TransferModal IS drawn this way. The `Draw()` method checks `tm.visible` and returns early if not visible. The question is who calls it. Since TransferModal is not a Flex child, it must be called from somewhere. Given that FileBrowser.Draw() exists and overrides the default, it's the natural place.
-
-**Wait -- I need to verify this.** Looking at the code again: FileBrowser.Draw() only calls `fb.Flex.Draw(screen)`. There's no call to `fb.transferModal.Draw(screen)`. This means either:
-1. TransferModal.Draw() is called from somewhere else (SetAfterDrawFunc?)
-2. TransferModal.Draw() is never explicitly called (and the modal doesn't actually render via Draw)
-
-Looking at the AfterDrawFunc:
-```go
-fb.app.SetAfterDrawFunc(func(screen tcell.Screen) {
-    // Only draws status bar
-})
-```
-
-No TransferModal draw there either.
-
-**Re-reading TransferModal.Draw()** -- it's defined but I don't see where it's called in the current codebase. This suggests TransferModal might not use the Draw-based overlay approach at all. Instead, it might render through a different mechanism (perhaps the progress display is drawn via the status bar's AfterDrawFunc, or through the QueueUpdateDraw mechanism updating some other primitive).
-
-**Actually, looking more carefully at TransferModal -- it has `visible` flag and `Show()`/`Hide()` methods, but the key rendering (progress text, speed, ETA) is done through... hmm.** The `Update()` method updates internal fields (fileLabel, infoLine, etaLine), but there's no mechanism to trigger a redraw with those new values unless Draw() is called.
-
-**Most likely explanation:** TransferModal.Draw() IS called from FileBrowser.Draw(), but the current code in FileBrowser.Draw() doesn't show it because... wait, let me re-read:
-
-```go
-func (fb *FileBrowser) Draw(screen tcell.Screen) {
-    x, y, width, height := fb.GetRect()
-    bgStyle := tcell.StyleDefault.Background(tcell.ColorDefault)
-    for row := y; row < y+height; row++ {
-        for col := x; col < x+width; col++ {
-            screen.SetContent(col, row, ' ', nil, bgStyle)
+func NewInputDialog(app *tview.Application) *InputDialog {
+    id := &InputDialog{Box: tview.NewBox(), app: app}
+    id.inputField = tview.NewInputField()
+    id.inputField.SetDoneFunc(func(key tcell.Key) {
+        if key == tcell.KeyEnter {
+            if id.onSubmit != nil {
+                id.onSubmit(id.inputField.GetText())
+            }
+            id.Hide()
+        } else if key == tcell.KeyEscape {
+            if id.onCancel != nil {
+                id.onCancel()
+            }
+            id.Hide()
         }
+    })
+    return id
+}
+
+func (id *InputDialog) HandleKey(event *tcell.EventKey) *tcell.EventKey {
+    if !id.visible {
+        return event
     }
-    fb.Flex.Draw(screen)
+    // Route to InputField which handles Enter/Esc via doneFunc
+    id.inputField.InputHandler(event, func(tview.Primitive) {})
+    return nil // consume all keys
 }
 ```
 
-There's no TransferModal.Draw() call here. This is a problem -- the TransferModal would never render.
+This correctly delegates Enter/Esc handling to the InputField's `doneFunc`.
 
-**Revised understanding:** The TransferModal may be drawn via `app.QueueUpdateDraw()` which triggers a full screen redraw, and the TransferModal might be a child of the Flex after all, or it might be drawn through tview's internal mechanisms.
+#### Clipboard State: Where Does It Live?
 
-Actually, I think I need to reconsider. In tview, `SetRoot(fb, true)` makes `fb` the root primitive. tview calls `Draw()` on the root primitive. If TransferModal is NOT a child of the Flex, it won't be drawn.
+**Answer: `FileBrowser` owns the clipboard.**
 
-**The most likely implementation:** TransferModal is meant to be drawn from within FileBrowser.Draw(), and the current code may have a bug where it's not being called, OR TransferModal was designed to be drawn but the Draw() call was not yet added because the modal is shown via `app.SetRoot()` replacement.
-
-Actually, re-reading the code flow more carefully:
-
-```go
-// In initiateTransfer():
-fb.transferModal.Show(direction, files[0].Name)
+```
+Clipboard (pure state struct, no UI)
+  ├── SourcePane int      // 0 = local, 1 = remote
+  ├── SourceFiles []domain.FileInfo
+  ├── SourceDir string     // absolute directory path
+  ├── Operation ClipboardOp // copy or move
+  └── Active bool
 ```
 
-`Show()` just sets internal state. It doesn't change the root. The modal progress updates happen via `QueueUpdateDraw()`:
+**File location:** `internal/adapters/ui/file_browser/clipboard.go`
 
-```go
-fb.app.QueueUpdateDraw(func() {
-    fb.transferModal.Update(p)
-})
+**Why in FileBrowser, not in panes:**
+- Clipboard spans two panes: mark in source pane, paste in target pane
+- `FileBrowser` is the only component with access to both panes
+- Panes are independent components -- they shouldn't know about each other
+- Matches the existing pattern: `FileBrowser` owns cross-pane state (`activePane`, `transferring`, `transferCancel`)
+
+**Why not in domain layer:**
+- Clipboard is purely UI state (which file is selected for copy/move)
+- It doesn't need persistence, business rules, or service-layer access
+- Domain layer should stay clean of UI-specific state
+
+**User flow for copy:**
+```
+1. User selects file in LocalPane
+2. User presses 'c' -> LocalPane.SetInputCapture intercepts
+3. LocalPane calls onMarkCopy callback (new callback)
+4. FileBrowser.handleMarkCopy() stores: {SourcePane: 0, SourceFiles: [fi], Operation: copy}
+5. FileBrowser updates status bar: "1 file(s) marked for copy"
+6. User presses Tab -> switchFocus() to RemotePane
+7. User navigates to destination directory
+8. User presses 'p' -> handleGlobalKeys intercepts
+9. FileBrowser.handlePaste() checks clipboard is active
+10. FileBrowser executes copy: LocalCopyService or TransferService
+11. FileBrowser clears clipboard, refreshes target pane
 ```
 
-`Update()` sets internal fields but doesn't trigger drawing. So `QueueUpdateDraw()` must trigger a redraw of the root (FileBrowser), which calls `FileBrowser.Draw()`, which should draw the modal overlay.
+**User flow for move:**
+Same as copy, but:
+- Step 2: User presses 'x' instead of 'c'
+- Step 4: Operation stored as `move`
+- Step 10: After copy completes, delete source files
+- Move = copy + delete. For cross-pane move, use TransferService (which already handles upload/download) + delete source.
 
-**Conclusion: The FileBrowser.Draw() method is MISSING the call to `fb.transferModal.Draw(screen)`.** This is either a bug that was introduced during refactoring, or the modal rendering works through some other mechanism I'm not seeing.
+**Cross-pane copy/move decision tree:**
 
-**For the RecentDirs feature, the correct approach is:**
+| Source | Target | Copy Implementation | Move Implementation |
+|--------|--------|-------------------|-------------------|
+| Local | Local | `LocalCopyService.CopyFile/CopyDir` | `LocalCopyService` + `LocalFS.Remove/RemoveAll` |
+| Remote | Remote | `RemoteCopyService.CopyFile/CopyDir` | `RemoteCopyService` + `SFTPClient.Remove/RemoveAll` |
+| Local | Remote | `TransferService.UploadFile/UploadDir` | `TransferService.Upload` + `LocalFS.Remove/RemoveAll` |
+| Remote | Local | `TransferService.DownloadFile/DownloadDir` | `TransferService.Download` + `SFTPClient.Remove/RemoveAll` |
 
-Add the overlay Draw calls to `FileBrowser.Draw()`:
+**Same-pane operations** (copy within local, copy within remote) use the new `CopyService`. **Cross-pane operations** use the existing `TransferService`. This maximizes code reuse.
+
+### Key Routing Integration
+
+Updated `handleGlobalKeys` with v1.2 keys:
+
+```
+FileBrowser.handleGlobalKeys(event):
+  1. Overlay interception chain (order matters):
+     a. inputDialog visible? -> inputDialog.HandleKey(event)
+     b. confirmDialog visible? -> confirmDialog.HandleKey(event)
+     c. recentDirs visible? -> recentDirs.HandleKey(event)
+     d. transferModal visible? -> transferModal.HandleKey(event)
+  2. Global keys:
+     Tab -> switchFocus()
+     Esc -> close()
+     F5 -> initiateDirTransfer()
+     p -> handlePaste()  ← NEW
+  3. Pane-specific global keys:
+     r (remote only) -> recentDirs.Show()
+     s/S -> sort controls
+  4. Pass to focused pane
+```
+
+Updated pane `SetInputCapture`:
+
+```
+Pane.SetInputCapture(event):
+  h -> NavigateToParent()
+  Space -> ToggleSelection()
+  . -> ToggleHidden()
+  d -> onDelete callback  ← NEW (if file selected)
+  R -> onRename callback  ← NEW (if file selected)
+  c -> onMarkCopy callback  ← NEW (if file selected)
+  x -> onMarkMove callback  ← NEW (if file selected)
+  m -> onMkdir callback  ← NEW
+  Backspace -> NavigateToParent()
+  Pass to Table (j/k/arrows/Enter/PgUp/PgDn)
+```
+
+**Why `d`, `R`, `c`, `x` go in Pane InputCapture (not handleGlobalKeys):**
+- These keys operate on the **currently selected item** in the focused pane
+- Panes own selection state (`selected map[string]bool`, `GetSelection()`)
+- Pane InputCapture is the established location for item-specific actions (like Space for toggle selection)
+- The callback pattern (`onDelete`, `onRename`, etc.) follows the existing `onFileAction` pattern
+
+**Why `m` (mkdir) goes in Pane InputCapture:**
+- mkdir creates a directory in the **current pane's path**
+- Pane owns `currentPath`
+- The callback passes `currentPath` to FileBrowser, which shows the InputDialog
+
+**Why `p` (paste) goes in handleGlobalKeys:**
+- Paste operates on the **clipboard** (owned by FileBrowser) and the **target pane's path**
+- FileBrowser is the only component that knows both the clipboard state and which pane is focused
+- Paste doesn't depend on which specific row is selected in the target pane -- it uses the directory path
+
+### Overlay Priority and Mutual Exclusion
+
+**Only one overlay visible at a time.** This is a hard constraint to avoid key routing ambiguity.
+
+| Overlay | Trigger | Blocks Until |
+|---------|---------|-------------|
+| `transferModal` | F5 or Enter on file | Transfer complete/canceled |
+| `recentDirs` | `r` key | Selection or Esc |
+| `confirmDialog` | `d` key | Confirm or cancel |
+| `inputDialog` | `R` or `m` key | Submit or cancel |
+
+**Enforcement:** Before showing any overlay, check that no other overlay is visible:
+
+```go
+func (fb *FileBrowser) anyOverlayVisible() bool {
+    return (fb.transferModal != nil && fb.transferModal.IsVisible()) ||
+        (fb.recentDirs != nil && fb.recentDirs.IsVisible()) ||
+        (fb.confirmDialog != nil && fb.confirmDialog.IsVisible()) ||
+        (fb.inputDialog != nil && fb.inputDialog.IsVisible())
+}
+```
+
+The key routing chain naturally enforces this because the first visible overlay intercepts all keys.
+
+### Synchronous vs Asynchronous Operations
+
+| Operation | Sync/Async | Rationale |
+|-----------|-----------|-----------|
+| Delete single file | **Sync** | `os.Remove` / `client.Remove` -- instant |
+| Delete directory (recursive) | **Async** | `os.RemoveAll` / `client.RemoveAll` may take time for large directories; show progress |
+| Rename | **Sync** | `os.Rename` / `client.Rename` -- instant (same filesystem) |
+| Mkdir | **Sync** | `os.Mkdir` / `client.Mkdir` -- instant |
+| Copy file (same pane) | **Async** | Streaming I/O, needs progress display |
+| Copy directory (same pane) | **Async** | Many files, needs progress + cancel |
+| Copy/Move (cross-pane) | **Async** | Reuses TransferService which is async |
+| Move (same pane) | **Async** | Copy + delete, needs progress |
+
+**Sync operations** execute in the UI thread (inside `QueueUpdateDraw` or directly in the key handler). Since they're instant, no blocking concern.
+
+**Async operations** follow the existing transfer pattern:
+```go
+func (fb *FileBrowser) handlePaste() {
+    // ... validation ...
+    ctx, cancel := context.WithCancel(context.Background())
+    go func() {
+        err := copyService.CopyFile(ctx, src, dst, func(p domain.TransferProgress) {
+            fb.app.QueueUpdateDraw(func() {
+                fb.transferModal.Update(p)
+            })
+        }, onConflict)
+        fb.app.QueueUpdateDraw(func() {
+            if err != nil { /* show error */ }
+            else { /* refresh pane */ }
+        })
+    }()
+}
+```
+
+For async delete of directories, we can show a simple status bar message ("Deleting directory...") rather than a full TransferModal. Only the progress-intensive operations (copy/move) need the modal.
+
+### Draw Chain Update
 
 ```go
 func (fb *FileBrowser) Draw(screen tcell.Screen) {
-    // Fill background
     fb.Flex.Draw(screen)
-    // Draw overlays on top
+    // Draw overlays in priority order (last drawn = visually on top)
     if fb.transferModal != nil && fb.transferModal.IsVisible() {
         fb.transferModal.Draw(screen)
     }
     if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
         fb.recentDirs.Draw(screen)
     }
+    if fb.confirmDialog != nil && fb.confirmDialog.IsVisible() {  // NEW
+        fb.confirmDialog.Draw(screen)
+    }
+    if fb.inputDialog != nil && fb.inputDialog.IsVisible() {      // NEW
+        fb.inputDialog.Draw(screen)
+    }
 }
 ```
 
-**Confidence: HIGH.** This is the correct overlay rendering approach in tview. If TransferModal is currently not rendering (which would be a bug), this fix would also resolve that. If it IS rendering through some other mechanism, adding the Draw call would be harmless (double-draw would just overwrite).
+Since only one overlay is visible at a time, the draw order among overlays doesn't matter visually. But maintaining a consistent order is good practice.
 
-### 4. Key Handling for RecentDirs Overlay
+### Data Flow Diagrams
 
-When RecentDirs is visible, it needs to intercept all keyboard input. This follows the TransferModal pattern:
+#### Delete Flow
+
+```
+User presses 'd' on selected file
+    |
+    v
+Pane.SetInputCapture -> onDelete callback
+    |
+    v
+FileBrowser.handleDelete(fi domain.FileInfo)
+    |
+    ├─ Check: anyOverlayVisible() -> return
+    ├─ Check: transferring -> return
+    |
+    v
+Build message: "Delete \"filename.txt\"?"
+    |
+    v
+confirmDialog.Show(message)
+  confirmDialog.onConfirm = func() {
+      fullPath := joinPath(pane.currentPath, fi.Name)
+      if fi.IsDir {
+          // Async: recursive delete
+          go func() {
+              err := fileService.RemoveAll(fullPath)
+              fb.app.QueueUpdateDraw(func() {
+                  if err != nil { showError(err) }
+                  else { pane.Refresh() }
+              })
+          }()
+      } else {
+          // Sync: single file delete
+          err := fileService.Remove(fullPath)
+          if err != nil { showError(err) }
+          else { pane.Refresh() }
+      }
+  }
+```
+
+#### Rename Flow
+
+```
+User presses 'R' on selected file
+    |
+    v
+Pane.SetInputCapture -> onRename callback
+    |
+    v
+FileBrowser.handleRename(fi domain.FileInfo)
+    |
+    ├─ Check: anyOverlayVisible() -> return
+    |
+    v
+inputDialog.Show("Rename", fi.Name)
+  inputDialog.onSubmit = func(newName string) {
+      if newName == "" || newName == fi.Name { return }
+      oldPath := joinPath(pane.currentPath, fi.Name)
+      newPath := joinPath(pane.currentPath, newName)
+      err := fileService.Rename(oldPath, newPath)
+      if err != nil { showError(err) }
+      else { pane.Refresh() }
+  }
+```
+
+#### Mkdir Flow
+
+```
+User presses 'm'
+    |
+    v
+Pane.SetInputCapture -> onMkdir callback
+    |
+    v
+FileBrowser.handleMkdir()
+    |
+    ├─ Check: anyOverlayVisible() -> return
+    |
+    v
+inputDialog.Show("New Directory", "")
+  inputDialog.onSubmit = func(name string) {
+      if name == "" { return }
+      fullPath := joinPath(pane.currentPath, name)
+      err := fileService.Mkdir(fullPath)
+      if err != nil { showError(err) }
+      else { pane.Refresh() }
+  }
+```
+
+#### Copy/Move (Mark + Paste) Flow
+
+```
+User presses 'c' or 'x' on selected file(s)
+    |
+    v
+Pane.SetInputCapture -> onMarkCopy/onMarkMove callback
+    |
+    v
+FileBrowser.handleMark(op ClipboardOp)
+    |
+    ├─ Collect selected files (or current row if none selected)
+    ├─ Store in clipboard: {SourcePane, SourceFiles, SourceDir, Operation}
+    └─ Update status bar: "3 file(s) marked for copy"
+    |
+    ... user navigates to target pane/directory ...
+    |
+User presses 'p'
+    |
+    v
+handleGlobalKeys -> handlePaste()
+    |
+    ├─ Check: clipboard.Active -> false? show error
+    ├─ Determine source/target services based on SourcePane vs activePane
+    |
+    ├─ Same pane (SourcePane == activePane):
+    |   └─ CopyService.CopyFile/CopyDir (async)
+    |
+    └─ Cross pane (SourcePane != activePane):
+        └─ TransferService.Upload/Download (async)
+    |
+    v
+If Operation == move:
+    After copy completes, delete source files
+    |
+    v
+Clear clipboard, refresh target pane, update status bar
+```
+
+### Dependency Injection Chain
+
+The DI chain in `cmd/main.go` needs to add CopyService:
 
 ```go
-// In FileBrowser.handleGlobalKeys():
-func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
-    // Overlay key handling (check before pane keys)
-    if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
-        return fb.recentDirs.HandleKey(event)
-    }
-    // TransferModal handling (existing)
-    if fb.transferModal != nil && fb.transferModal.IsVisible() {
-        fb.transferModal.HandleKey(event)
-        return nil
-    }
-    // ... existing Tab, Esc, s, S, F5 handling ...
-}
+// cmd/main.go (current)
+fileService := local_fs.New(log)
+sftpService := sftp_client.New(log)
+transferService := transfer.New(log, sftpService)
+tui := ui.NewTUI(log, serverService, fileService, sftpService, transferService, version, gitCommit)
+
+// cmd/main.go (v1.2)
+fileService := local_fs.New(log)
+sftpService := sftp_client.New(log)
+transferService := transfer.New(log, sftpService)
+localCopyService := local_fs.NewCopyService(log)           // NEW
+remoteCopyService := sftp_client.NewCopyService(log, sftpService) // NEW
+tui := ui.NewTUI(log, serverService, fileService, sftpService, transferService,
+    localCopyService, remoteCopyService, version, gitCommit)  // UPDATED
 ```
 
-RecentDirs.HandleKey dispatches:
-- `j` / `tcell.KeyDown` -- move selection down
-- `k` / `tcell.KeyUp` -- move selection up
-- `tcell.KeyEnter` -- navigate to selected path, call onNavigate callback
-- `tcell.KeyEscape` -- dismiss overlay, call onDismiss callback
-- All other keys -- consumed (prevent passthrough to underlying panes)
-
-### 5. Selection -> Navigation Flow
-
-```
-User selects path in RecentDirs
-    ↓
-recentDirs.HandleKey(Enter)
-    ↓
-rd.onNavigate(path)
-    ↓ (wired in FileBrowser.build())
-fb.remotePane.NavigateTo(path)    // NEW method on RemotePane
-    ↓
-rp.currentPath = path
-rp.selected = make(map[string]bool)
-rp.Refresh()
-    ↓
-(Does NOT fire onPathChange -- avoids re-recording the selected path)
-```
-
-**Key decision:** `NavigateTo(path)` should NOT fire `onPathChange`, because navigating to a recently-visited path shouldn't record it again (it's already in the list). Alternatively, it could re-record it (move to front), which is also reasonable UX. **Recommendation: Don't re-record** -- it's already at the top of the list, and re-recording creates unnecessary churn.
-
-### 6. NavigateTo Method (New on RemotePane)
+The `NewFileBrowser` constructor also needs the new services:
 
 ```go
-// NavigateTo sets the current path directly (used by recent dirs navigation).
-// Unlike NavigateInto, this does not trigger onPathChange callback.
-func (rp *RemotePane) NavigateTo(path string) {
-    if !rp.connected {
-        return
-    }
-    rp.currentPath = path
-    rp.selected = make(map[string]bool)
-    rp.Refresh()
-}
+func NewFileBrowser(
+    app *tview.Application,
+    log *zap.SugaredLogger,
+    fs ports.FileService,
+    sftp ports.SFTPService,
+    ts ports.TransferService,
+    lcs ports.CopyService,   // NEW: local copy service
+    rcs ports.CopyService,   // NEW: remote copy service
+    server domain.Server,
+    onClose func(),
+) *FileBrowser
 ```
 
-## Complete Data Flow
+**Design decision: Pass two CopyService instances or one with a "side" parameter?**
 
-```
-[Navigation Event]
-    │
-    ├─ NavigateInto(dirName) ──→ onPathChange(path) ──→ recentDirs.Record(path)
-    │                                                          │
-    │                                                          ├─ Dedup (move to front)
-    │                                                          └─ Trim to 10
-    │
-    ├─ NavigateToParent() ──→ onPathChange(path) ──→ recentDirs.Record(path)
-    │   (after fix)               (after fix)
-    │
-    └─ NavigateTo(path) ──→ (no callback, no recording)
-        (recent dirs)
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Two separate instances** (Recommended) | Each is a simple adapter; no runtime dispatch; type-safe | One more constructor parameter |
+| One CopyService with `side` parameter | Fewer parameters | Runtime type switch; less clean |
 
-[Display Recent Dirs]
-    │
-    ├─ User presses 'r' in RemotePane
-    │   └─→ onShowRecentDirs callback
-    │       └─→ fb.recentDirs.Show()
-    │           └─→ rd.visible = true, rd.selectedIndex = 0
-    │
-    ├─ User presses j/k to navigate list
-    │   └─→ handleGlobalKeys → recentDirs.HandleKey
-    │       └─→ rd.selectedIndex++ / --
-    │
-    ├─ User presses Enter
-    │   └─→ recentDirs.HandleKey(Enter)
-    │       └─→ rd.onNavigate(selectedPath)
-    │           └─→ fb.remotePane.NavigateTo(path)
-    │           └─→ rd.Hide()
-    │
-    └─ User presses Esc
-        └─→ recentDirs.HandleKey(Esc)
-            └─→ rd.Hide()
-```
+**Recommendation:** Two separate instances. Both implement the same `CopyService` interface. `FileBrowser` dispatches to the correct one based on source/target pane.
 
 ## Modified vs New Files
 
 ### New Files
 
-| File | Purpose |
-|------|---------|
-| `internal/adapters/ui/file_browser/recent_dirs.go` | RecentDirs struct: ring buffer, Draw(), HandleKey(), Show(), Hide(), Record() |
+| File | Purpose | Lines (est.) |
+|------|---------|-------------|
+| `internal/core/ports/copy.go` | CopyService interface definition | ~15 |
+| `internal/core/services/copy.go` | Extracted copyWithProgress utility | ~50 |
+| `internal/adapters/data/local_fs/local_copy.go` | LocalCopyService adapter | ~120 |
+| `internal/adapters/data/sftp_client/remote_copy.go` | RemoteCopyService adapter | ~130 |
+| `internal/adapters/ui/file_browser/confirm_dialog.go` | ConfirmDialog overlay | ~100 |
+| `internal/adapters/ui/file_browser/input_dialog.go` | InputDialog overlay | ~120 |
+| `internal/adapters/ui/file_browser/clipboard.go` | Clipboard state struct | ~50 |
 
 ### Modified Files
 
-| File | Change | Lines Affected |
-|------|--------|----------------|
-| `file_browser.go` | Add `recentDirs` field to FileBrowser struct | +1 field |
-| `file_browser.go` | Create RecentDirs in `build()` | +5 lines |
-| `file_browser.go` | Wire `onShowRecentDirs` callback on RemotePane | +4 lines |
-| `file_browser.go` | Wire `onNavigate` callback on RecentDirs | +5 lines |
-| `file_browser.go` | Add `recentDirs.Record(path)` to RemotePane's onPathChange | +1 line |
-| `file_browser.go` | Add RecentDirs overlay check in `handleGlobalKeys` | +3 lines |
-| `file_browser.go` | Add RecentDirs.Draw() call in Draw() | +2 lines |
-| `remote_pane.go` | Add `onShowRecentDirs` callback field | +1 field |
-| `remote_pane.go` | Add `case 'r'` in SetInputCapture | +4 lines |
-| `remote_pane.go` | Add `OnShowRecentDirs()` setter method | +3 lines |
-| `remote_pane.go` | Add `NavigateTo(path)` method | +8 lines |
-| `remote_pane.go` | Fix: add `onPathChange` call in `NavigateToParent()` | +3 lines |
+| File | Change | Lines (est.) |
+|------|--------|-------------|
+| `internal/core/ports/file_service.go` | Add Remove, RemoveAll, Rename, Mkdir, Stat to FileService | +10 |
+| `internal/adapters/data/sftp_client/sftp_client.go` | Add RemoveAll, Rename, Mkdir methods | +40 |
+| `internal/adapters/data/local_fs/local_fs.go` | Add Remove, RemoveAll, Rename, Mkdir, Stat methods | +40 |
+| `internal/adapters/data/transfer/transfer_service.go` | Replace inline copyWithProgress with import from services | -50, +5 |
+| `internal/adapters/ui/file_browser/file_browser.go` | Add clipboard, confirmDialog, inputDialog fields; add handler methods | +80 |
+| `internal/adapters/ui/file_browser/file_browser_handlers.go` | Add overlay checks, paste key routing | +30 |
+| `internal/adapters/ui/file_browser/local_pane.go` | Add d/R/c/x/m key bindings + callbacks | +30 |
+| `internal/adapters/ui/file_browser/remote_pane.go` | Add d/R/c/x/m key bindings + callbacks | +30 |
+| `cmd/main.go` | Add CopyService creation, pass to TUI | +5 |
+| `internal/adapters/ui/handlers.go` | Pass CopyService to NewFileBrowser | +5 |
+| `go.mod` | Change pkg/sftp from indirect to direct | 1 line |
 
 ### Unchanged Files
 
-- `local_pane.go` -- No changes (feature is remote-only)
-- `transfer_modal.go` -- No changes (independent overlay)
-- `progress_bar.go` -- No changes
-- `file_sort.go` -- No changes
-- Domain/ports/services layers -- No changes
+- `internal/core/domain/file_info.go` -- FileInfo struct needs no changes
+- `internal/core/domain/transfer.go` -- TransferProgress and ConflictHandler reused as-is
+- `internal/adapters/ui/file_browser/transfer_modal.go` -- Reused for copy/move progress, not modified
+- `internal/adapters/ui/file_browser/recent_dirs.go` -- Independent feature, not modified
+- `internal/adapters/ui/file_browser/progress_bar.go` -- Reused by TransferModal, not modified
+- `internal/adapters/ui/file_browser/file_sort.go` -- Sort logic, not modified
 
 ## Build Order
 
-```
-Phase 1: RecentDirs struct (no dependencies on existing code)
-  └── recent_dirs.go
-      - RecentDirs struct definition
-      - Record() method (ring buffer logic)
-      - Draw() method (render path list)
-      - HandleKey() method (j/k/Enter/Esc)
-      - Show()/Hide()/IsVisible()
-
-Phase 2: RemotePane modifications (depends on Phase 1 for type)
-  └── remote_pane.go
-      - Add onShowRecentDirs callback
-      - Add 'r' key to SetInputCapture
-      - Add NavigateTo() method
-      - Fix NavigateToParent() onPathChange asymmetry
-
-Phase 3: FileBrowser wiring (depends on Phase 1 + Phase 2)
-  └── file_browser.go
-      - Add recentDirs field
-      - Create and wire in build()
-      - Add overlay check in handleGlobalKeys
-      - Add Draw() overlay rendering
-```
-
-## UI Layout Specification
+Build order respects dependency chains and allows incremental testing.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│            ┌─────────────────────────────┐                   │
-│            │ Recent Remote Directories    │                   │
-│            ├─────────────────────────────┤                   │
-│            │  /home/user/projects/app     │  ← selected      │
-│            │  /var/log                   │                   │
-│            │  /etc/nginx                 │                   │
-│            │  /tmp/downloads             │                   │
-│            │                             │                   │
-│            │  [j/k] Navigate  [Enter] Go │                   │
-│            │  [Esc] Close                │                   │
-│            └─────────────────────────────┘                   │
-│                                                              │
-│  (FileBrowser content visible but dimmed behind overlay)     │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+Phase 1: Port interfaces + shared utility (no UI changes)
+  ├── internal/core/ports/file_service.go     (add methods to FileService)
+  ├── internal/core/ports/copy.go             (new CopyService interface)
+  └── internal/core/services/copy.go          (extract copyWithProgress)
 
-Overlay specs:
-- Centered horizontally and vertically within the terminal
-- Fixed width: 50 characters (or 60% of terminal width, whichever is smaller)
-- Max height: 15 rows (including border, title, footer)
-- Background: Color232 (matching TransferModal)
-- Border: Color238 (matching existing borders)
-- Selected row highlight: Color235 background, Color255 foreground
-- Footer hints: Color245 (matching existing hint text)
+Phase 2: Adapter implementations (depends on Phase 1)
+  ├── internal/adapters/data/local_fs/local_fs.go      (add new methods)
+  ├── internal/adapters/data/sftp_client/sftp_client.go (add new methods)
+  ├── internal/adapters/data/local_fs/local_copy.go     (new file)
+  ├── internal/adapters/data/sftp_client/remote_copy.go (new file)
+  └── internal/adapters/data/transfer/transfer_service.go (refactor copyWithProgress)
+
+Phase 3: UI state + simple overlays (depends on Phase 2)
+  ├── internal/adapters/ui/file_browser/clipboard.go      (pure state)
+  ├── internal/adapters/ui/file_browser/confirm_dialog.go (overlay)
+  └── internal/adapters/ui/file_browser/input_dialog.go   (overlay)
+
+Phase 4: Key routing + handler wiring (depends on Phase 3)
+  ├── internal/adapters/ui/file_browser/local_pane.go          (new keys + callbacks)
+  ├── internal/adapters/ui/file_browser/remote_pane.go         (new keys + callbacks)
+  ├── internal/adapters/ui/file_browser/file_browser.go        (handler methods)
+  └── internal/adapters/ui/file_browser/file_browser_handlers.go (overlay chain + paste)
+
+Phase 5: DI chain + integration (depends on Phase 4)
+  ├── cmd/main.go              (create CopyServices, pass to TUI)
+  └── internal/adapters/ui/handlers.go (pass CopyServices to NewFileBrowser)
+```
 
 ## Anti-Patterns to Avoid
 
-### 1. Don't use tview.List for the overlay
-tview.List has its own focus management and input handling that conflicts with the overlay pattern. Use a `*tview.Box` with manual `Draw()`, exactly like TransferModal.
+### 1. Don't add file operations to TransferService
+TransferService is specifically for cross-pane transfers (local <-> remote). Adding same-pane copy would violate single responsibility. Use the separate CopyService.
 
-### 2. Don't persist recent paths
-PROJECT.md explicitly says "in-memory only, cleared on exit." Adding persistence would require domain model changes and is out of scope.
+### 2. Don't use tview.Modal for confirm/input dialogs
+`tview.Modal` uses `app.SetRoot()` which replaces the entire view. This breaks the overlay draw chain and causes visual artifacts. Use the `*tview.Box` + manual `Draw()` pattern established by TransferModal and RecentDirs.
 
-### 3. Don't add NavigateTo to the ports/domain layer
-`NavigateTo` is a UI convenience method (skip recording). It's not a new business capability -- it's just `NavigateInto` without the callback. Keep it in the UI adapter.
+### 3. Don't store clipboard state in panes
+Panes are independent components. Clipboard requires cross-pane visibility. Storing clipboard in LocalPane means RemotePane can't access it during paste.
 
-### 4. Don't intercept 'r' in handleGlobalKeys
-The 'r' key is already used in the main TUI for refresh (`handleRefreshBackground`). While there's no conflict (they're different SetRoot contexts), keeping pane-specific keys in pane InputCapture maintains the established pattern and makes the code easier to reason about.
+### 4. Don't handle delete/rename in the pane's SetSelectedFunc
+SetSelectedFunc fires on Enter key, which is already used for navigation (directories) and file transfer (files). Adding delete/rename there would conflict.
 
-### 5. Don't record the initial path
-The initial remote path is "." (SFTP home). Recording this is noise. Only record paths the user explicitly navigates to.
+### 5. Don't make FileService methods async
+`Remove`, `Rename`, `Mkdir`, `Stat` are instant operations. Adding `context.Context` or callbacks would over-engineer the interface. Only `CopyService` needs async semantics.
 
-## Risk Assessment
+### 6. Don't use SFTP Rename for move-to-existing-target
+`SSH_FXP_RENAME` behavior when the target exists is server-dependent (RFC undefined). For move operations where the target might exist, use the CopyService copy + delete pattern instead, which gives us conflict handling via `onConflict`.
 
-| Risk | Severity | Likelihood | Mitigation |
-|------|----------|------------|------------|
-| TransferModal.Draw() not being called (potential existing bug) | HIGH | MEDIUM | Adding Draw call in FileBrowser.Draw() fixes this |
-| 'r' key conflict with future features | LOW | LOW | Document the binding; 'r' is only used for refresh in main TUI, not in file browser |
-| NavigateToParent onPathChange fix changes existing behavior | LOW | LOW | Only adds a Sync() call that was likely an oversight |
-| RecentDirs overlay blocks TransferModal overlay | MEDIUM | LOW | Only one overlay should be visible at a time; guard in handleGlobalKeys |
+### 7. Don't forget the overlay mutual exclusion check
+If two overlays somehow become visible simultaneously, key routing becomes ambiguous. Always check `anyOverlayVisible()` before showing a new overlay.
 
-## Open Questions
+## Scalability Considerations
 
-1. **Should selecting a recent path move it to the front of the list?** Current design says no (it's already near the top). But some UX patterns re-promote on re-use. Decision: defer to implementation -- start with no re-promotion.
+| Concern | Current (v1.1) | v1.2 | Future |
+|---------|---------------|------|--------|
+| Overlay count | 2 (TransferModal, RecentDirs) | 4 (+ConfirmDialog, InputDialog) | Could grow; consider overlay manager |
+| Key bindings in panes | 3 (h, Space, .) | 8 (+d, R, c, x, m) | Approaching keyboard crowding |
+| FileBrowser fields | 7 | 10 (+clipboard, confirmDialog, inputDialog) | Manageable |
+| Constructor params | 6 | 8 (+2 CopyServices) | Consider options struct if grows further |
+| Services in DI chain | 4 (fileService, sftpService, transferService, serverService) | 6 (+2 CopyServices) | Consider service container |
 
-2. **Should the overlay have a title showing the server name?** Useful when users have multiple file browser sessions (though current architecture is one-at-a-time). Decision: include server name in title for clarity.
+**Keyboard crowding mitigation:** At 8 pane-level bindings, we're approaching the limit of memorable shortcuts. Future features should consider prefix modes (e.g., `g` as a leader key like vim's `g` prefix).
 
-3. **Empty state: what to show when no recent dirs recorded yet?** Options: (a) don't show the popup at all, (b) show "No recent directories" message. Decision: (a) -- don't show popup if list is empty.
+**Overlay manager:** With 4 overlays, the mutual exclusion check is still simple (4 boolean checks). If we reach 6+, consider an `OverlayManager` struct that tracks the active overlay and provides `Show(overlay)` / `IsActive()` methods.
 
 ## Sources
 
-- Direct code analysis of `internal/adapters/ui/file_browser/` package (all 7 files)
-- TransferModal overlay pattern (transfer_modal.go) as architectural reference
-- PROJECT.md v1.1 milestone requirements
-- Existing onPathChange callback pattern (local_pane.go, remote_pane.go)
-- Key routing chain documented in file_browser_handlers.go comments
+- **HIGH confidence (project source code):**
+  - `internal/core/ports/file_service.go` -- FileService + SFTPService interfaces
+  - `internal/core/ports/transfer.go` -- TransferService interface pattern
+  - `internal/adapters/data/sftp_client/sftp_client.go` -- SFTPClient implementation
+  - `internal/adapters/data/local_fs/local_fs.go` -- LocalFS implementation
+  - `internal/adapters/data/transfer/transfer_service.go` -- copyWithProgress pattern (lines 436-485)
+  - `internal/adapters/ui/file_browser/file_browser.go` -- FileBrowser orchestration
+  - `internal/adapters/ui/file_browser/file_browser_handlers.go` -- Key routing chain
+  - `internal/adapters/ui/file_browser/transfer_modal.go` -- Overlay pattern reference
+  - `internal/adapters/ui/file_browser/recent_dirs.go` -- Overlay pattern reference
+  - `internal/adapters/ui/file_browser/local_pane.go` -- Pane callback pattern
+  - `internal/adapters/ui/file_browser/remote_pane.go` -- Pane callback pattern
+  - `internal/core/domain/transfer.go` -- ConflictHandler, TransferProgress types
+  - `internal/core/domain/file_info.go` -- FileInfo domain model
+  - `cmd/main.go` -- DI chain
+
+- **HIGH confidence (pkg/sftp library API):**
+  - `github.com/pkg/sftp v1.13.10` -- Remove, RemoveAll, Rename, Mkdir, Stat (verified in go module source)
+
+---
+*Architecture research: 2026-04-15 (v1.2 File Management Operations)*
+*Original: 2026-04-14 (v1.1 Recent Remote Directories overlay pattern)*

@@ -1,245 +1,461 @@
-# Feature Research
+# Feature Research: File Operations (v1.2)
 
-**Analysis Date:** 2026-04-14
-**Domain:** TUI File Transfer — Recent Remote Directories (v1.1)
-**Confidence:** HIGH
+**Analysis Date:** 2026-04-15
+**Domain:** TUI File Management Operations — Delete, Rename, Mkdir, Copy, Move
+**Confidence:** HIGH (cross-referenced across mc, ranger, vifm, lf + existing codebase analysis)
+**Mode:** Ecosystem
 
 ## Research Sources
 
-- Midnight Commander (mc) — Alt+u directory history, Ctrl+\ Hotlist (canonical dual-pane TUI)
-- ranger — H/L directory history stack (session-based MRU)
-- nnn — B key symlink bookmarks (persistent), `-` previous directory
-- lf — marks/bookmarks system, special `'` mark for last directory
-- FileZilla — QuickConnect history (10-entry MRU, recentservers.xml)
-- Windows Explorer — Quick Access (separates "Recent" vs "Frequent")
-- lazyssh existing codebase — RemotePane navigation, TransferModal overlay pattern
+- **Midnight Commander (mc)** — F5/F6/F7/F8/Shift+F6 keybindings, recursive delete confirmation dialog (canonical dual-pane TUI)
+- **ranger** — yy/dd/pp mark-put model, `d` opens destructive actions submenu, `cw` vim-style rename
+- **vifm** — yy/dd/p vim-compatible mark-put, `cw` inline rename, `:mkdir` command mode
+- **lf** — y/d/p mark-put, `r` inline rename, trash-cli integration for safe delete
+- **nnn** — per-file delete confirmation (anti-pattern: alert fatigue), 0 to select all
+- **Nielsen Norman Group** — confirmation dialog UX guidelines (use sparingly, for irreversible actions)
+- **UX StackExchange** — "Confirm or Undo" debate (undo preferred for recoverable, confirm for irreversible)
+- **lazyssh existing codebase** — TransferModal multi-mode state machine, RecentDirs overlay pattern, FileService/SFTPService ports, Clipboard concept not yet implemented
 
 ---
 
-## Part 1: Recent Remote Directories (v1.1 New Feature)
+## Part 1: File Operations Feature Landscape (v1.2)
 
 ### Table Stakes (Users Expect These)
 
-Features users assume exist in a "recent directories" feature. Missing = feels broken.
+Missing any of these makes the file browser feel incomplete. Users coming from mc/ranger/vifm expect these as bare minimum.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| 自动记录访问的目录 | 所有主流文件管理器（MC、ranger、nnn、Windows Explorer）都在用户进入新目录时自动记录。用户不会手动"添加到收藏"，而是期望系统静默记录。 | LOW | 在 `RemotePane.NavigateInto()` 和 `NavigateToParent()` 的 `onPathChange` 回调中追加路径。只需在现有回调链上加一行调用。 |
-| MRU 排序（最近访问排最前） | 用户按 `r` 打开列表时期望看到的第一个就是刚才离开的目录。这是 MRU（Most Recently Used）的标准行为，所有 IDE 和文件管理器都如此。 | LOW | `[]string` 切片即可。新路径去重后 prepend 到头部。10 条上限意味着 O(n) 去重完全足够。 |
-| 重复路径折叠（去重） | 同一目录访问 5 次不应出现 5 条。用户期望每个路径只出现一次，但每次访问都更新其位置到最前面。 | LOW | 每次插入前从 slice 中移除已有相同路径（如果存在），再 prepend。Go slice 操作即可。 |
-| 选择后导航到该目录 | 用户从列表中选中一条路径并按 Enter，远程面板应直接跳转到该目录。这是"最近目录"功能的核心价值——快速跳转。 | LOW | 调用已有的 `RemotePane.NavigateInto()` 或设置 `currentPath` 后 `Refresh()`。基础设施已存在。 |
-| Esc 关闭弹窗 | 所有弹窗式 UI 组件的标准行为。 | LOW | 与现有 TransferModal 的 Esc 模式一致。 |
-| 列表为空时显示提示 | 用户第一次使用时按 `r` 应看到"暂无记录"而不是空白弹窗。 | LOW | 简单的 len check。 |
+#### Delete (d key)
 
-### Differentiators (Competitive Advantage)
+| Aspect | Detail | Confidence |
+|--------|--------|------------|
+| **Trigger** | `d` key on selected item (cursor or space-selected) | HIGH — mc F8, ranger `dD`, lf `d`, vifm `d` |
+| **Single file** | Delete immediately with confirmation dialog | HIGH |
+| **Directory** | Recursive delete with enhanced confirmation (warn about contents) | HIGH — mc shows recursive delete dialog for non-empty dirs |
+| **Multi-select** | Delete all space-selected items in batch | HIGH — mc, ranger, lf all support bulk delete |
+| **Confirmation** | Single dialog for entire operation (NOT per-file) | HIGH — nnn's per-file prompting is widely criticized as anti-pattern |
+| **Dialog content** | Show: item name, type (file/dir), size, recursive warning for dirs | MEDIUM — UX best practice: communicate scope |
+| **Post-delete** | Refresh listing, move cursor to nearest sibling (not to top) | MEDIUM — mc preserves cursor position; ranger does too |
+| **Local pane** | `os.Remove()` for files, `os.RemoveAll()` for dirs | HIGH — standard Go |
+| **Remote pane** | SFTP `Remove()` for files, need `RemoveDirectory()` for recursive | HIGH — pkg/sftp supports both |
+| **Error handling** | Show error in status bar, partial success for multi-delete | MEDIUM |
+
+**Edge cases for delete:**
+- Deleting the currently open directory (self) — should be blocked
+- Deleting a directory that is the parent of the other pane's cwd — mc allows this
+- Permission denied on some files in recursive delete — report partial failure
+- Symlinks: delete the link itself, not follow it (standard behavior)
+- Read-only files — `os.Remove` handles this; SFTP may need mode change first
+- Very large directories (1000+ files) — async with progress indication
+- Empty selection — status bar message "No files selected"
+
+#### Rename (R key)
+
+| Aspect | Detail | Confidence |
+|--------|--------|------------|
+| **Trigger** | `R` key on current item (single item only, not multi-select) | HIGH — mc Shift+F6, ranger `cw`, vifm `cw`, lf `r` |
+| **UI pattern** | Inline edit: InputField overlay on the file name column | HIGH — all terminal file managers use inline edit |
+| **Pre-fill** | Current filename as default text | HIGH — universal pattern |
+| **Selection** | Select filename without extension (stem only) | MEDIUM — ranger `cw` selects stem; vifm `cw` selects full name. Selecting stem is more useful. |
+| **Confirm** | Enter commits rename, Esc cancels | HIGH |
+| **Empty name** | Block and show error "Filename cannot be empty" | HIGH |
+| **Name collision** | If new name exists in same directory, show overwrite confirmation | HIGH |
+| **Post-rename** | Refresh listing, keep cursor on renamed item | MEDIUM |
+| **Local pane** | `os.Rename()` | HIGH |
+| **Remote pane** | SFTP `Rename()` | HIGH — pkg/sftp has `client.Rename()` |
+| **Extension change** | Allowed — user may want to change file type | HIGH |
+
+**Edge cases for rename:**
+- Rename to existing name (no-op) — silently ignore or show "same name"
+- Rename to name with invalid characters — `/`, `\0` on Unix; `<`, `>`, `:`, etc. on Windows
+- Leading/trailing spaces — trim and warn, or preserve (OS-dependent)
+- Very long filenames — truncate display in InputField but accept full name
+- Rename parent directory — other pane's cwd becomes invalid; mark as stale
+- Concurrent modification (file changed between list and rename) — retry or report error
+
+#### Create Directory (m key)
+
+| Aspect | Detail | Confidence |
+|--------|--------|------------|
+| **Trigger** | `m` key (mkdir) | HIGH — mc F7, vifm `:mkdir` |
+| **UI pattern** | Small centered popup with InputField | HIGH — mc shows input dialog, vifm shows command input |
+| **Pre-fill** | Empty input field with cursor ready | HIGH |
+| **Confirm** | Enter creates directory, Esc cancels | HIGH |
+| **Empty name** | Block and show error | HIGH |
+| **Already exists** | Show error "Directory already exists" | HIGH |
+| **Nested creation** | Support `path/to/dir` — create all intermediate directories | MEDIUM — mc does NOT support nested; ranger does not. lazyssh should support it since `MkdirAll` already exists. |
+| **Post-create** | Refresh listing, scroll to and select the new directory | MEDIUM |
+| **Local pane** | `os.MkdirAll()` | HIGH |
+| **Remote pane** | `sftpService.MkdirAll()` — already exists | HIGH — confirmed in sftp_client.go |
+
+**Edge cases for mkdir:**
+- Permission denied — show error in status bar
+- Invalid characters in path — OS-dependent validation
+- Creating in read-only filesystem — error handling
+- Path traversal attempts (`../../etc`) — allow if user has permissions (admin tool, not sandbox)
+
+#### Copy (c mark + p paste)
+
+| Aspect | Detail | Confidence |
+|--------|--------|------------|
+| **Mark trigger** | `c` key marks current item (or selected items) for copy | HIGH — ranger `yy`, vifm `yy`, lf `y` |
+| **Mark indicator** | Status bar shows "N file(s) marked for copy" | MEDIUM — ranger shows status line, lf shows copy count |
+| **Paste trigger** | `p` key pastes (copies) marked files to current pane's directory | HIGH — ranger `pp`, vifm `p`, lf `p` |
+| **Same-directory paste** | Create copy with `.1` suffix (e.g., `file.1.txt`) | MEDIUM — follows existing `nextAvailableName()` pattern |
+| **Cross-pane paste** | Copy from local to remote or remote to local (transfer) | HIGH — this is the key value of dual-pane copy |
+| **Multi-file** | All marked files copied in batch | HIGH |
+| **Directory copy** | Recursive copy of entire directory tree | HIGH |
+| **Progress** | Reuse TransferModal for cross-pane (transfer); simple status for same-pane | MEDIUM |
+| **Post-paste** | Clear marks, refresh target pane | HIGH |
+| **Local-local** | `os.Copy` or `io.Copy` loop for same-pane | HIGH |
+| **Remote-remote** | SFTP server-side copy (if supported) or download+reupload | LOW — SFTP protocol doesn't have server-side copy; need download+reupload |
+
+**Edge cases for copy:**
+- Mark files, navigate, then mark more files in different directory — should replace previous mark (standard behavior) or extend (ranger extends with `ya`)
+- Paste into a directory that doesn't exist yet — create it automatically (MkdirAll)
+- Large file copy on same filesystem — could use hard links for speed, but out of scope
+- Copy symlink — copy the link target (follow symlink), not the link itself
+- Permission errors during recursive copy — report partial failure
+- Disk full during copy — stop and report, clean up partial files
+
+#### Move (x mark + p paste)
+
+| Aspect | Detail | Confidence |
+|--------|--------|------------|
+| **Mark trigger** | `x` key marks current item (or selected items) for move/cut | HIGH — ranger `dd`, vifm `dd`, lf `d` (cut) |
+| **Paste trigger** | `p` key pastes (moves) marked files to current pane's directory | HIGH — ranger `pp` (context-dependent: copy or move), vifm `p`, lf `p` |
+| **Same-directory paste** | This is effectively a rename — show rename UI instead | MEDIUM — ranger treats same-dir move as rename |
+| **Cross-pane move** | Move = copy + delete source | HIGH — this is the dual-pane value |
+| **Multi-file** | All marked files moved in batch | HIGH |
+| **Directory move** | Recursive move of entire directory tree | HIGH |
+| **Confirmation** | For cross-pane move, confirm before deleting source | MEDIUM — destructive operation |
+| **Post-paste** | Clear marks, refresh both source and target panes | HIGH |
+| **Source cleanup** | After successful cross-pane copy, delete source files | HIGH |
+| **Error recovery** | If delete fails after copy, leave source files and report error | HIGH |
+
+**Edge cases for move:**
+- Move to same location — no-op (or rename if name changed)
+- Move parent directory into itself — block (infinite loop)
+- Move directory into its own subdirectory — block
+- Partial failure in multi-file move — some files copied but not all deleted from source — report discrepancy
+- Cross-filesystem move (local-local) — requires copy+delete, not atomic rename
+- Network interruption during remote move — partial state, need cleanup
+
+---
+
+### Differentiators (What Sets lazyssh Apart)
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| 按服务器自动隔离 | FileBrowser 实例的生命周期绑定到单个服务器连接。最近目录列表存在 FileBrowser 实例中，天然按服务器隔离。不需要额外实现分组逻辑。 | LOW (架构天然支持) | PROJECT.md 提到"记录粒度为本机目录 + 服务器组合"。当前架构自动满足。 |
-| 仅内存保存，退出清空 | 避免持久化带来的隐私顾虑（记录了用户访问过哪些服务器目录），避免缓存失效（远程目录可能被删除/重命名）。符合"不引入新安全风险"约束。 | LOW | 零存储代码。FileBrowser 被 GC 回收时列表自动消失。 |
-| j/k 键导航弹窗列表 | 与远程面板的 j/k 导航保持一致的交互模型。用户不需要学习新按键。 | LOW | 复用 tview.Table 内置 j/k 支持或手动 `selectedIdx` 管理。 |
+| **Unified c/x/p model for cross-pane operations** | In mc/ranger, copy and transfer are separate actions (F5 for transfer). In lazyssh, `c` mark + `p` paste on the other pane = transfer. This unifies local copy and cross-pane transfer under one mental model. | MEDIUM | Clipboard struct tracks source pane; paste detects cross-pane vs same-pane. |
+| **Cross-pane move (copy + delete)** | Most dual-pane managers treat F6 (move) as transfer + delete. lazyssh's `x` + `p` achieves the same but with the same mark-put consistency. | MEDIUM | Reuses existing TransferService for the copy phase, then DeleteService for cleanup. |
+| **Status bar mark indicator** | After pressing `c` or `x`, status bar shows "3 file(s) marked for copy" or "2 file(s) marked for move". This gives immediate feedback without a separate panel. | LOW | Simple text update in statusBar. |
+| **Recursive delete with scope display** | Confirmation dialog shows item count and total size for directory deletes, not just "Delete directory?" | LOW | Reuse WalkDir for counting. |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+### Anti-Features (Explicitly NOT Build)
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| 持久化到磁盘（跨会话保存） | 用户可能想重启后还能看到之前的远程目录 | 1. 安全风险：记录了用户访问过哪些服务器的哪些目录<br>2. 缓存失效：远程目录可能已被删除/重命名<br>3. 需要文件存储，违反"零外部依赖"约束 | 当前会话内有效。如未来需要可做 opt-in 配置 |
-| 频率加权排序（Frequent） | Windows Quick Access 有 "Frequent folders" | 1. 实现复杂度高：需计数器 + 时间衰减<br>2. 用户心智不匹配：按 `r` 是"最近"不是"最常"<br>3. 10 条上限下频率排序意义不大 | 纯 MRU 排序，简单可预测 |
-| 书签/收藏夹功能 | MC 的 Hotlist 是手动收藏的目录 | 1. 需手动管理（增删改），增加 UI 复杂度<br>2. 需持久化才有价值，引入安全风险<br>3. 超出 v1.1 范围 | v1.1 仅做自动记录。书签可作为 v2 特性 |
-| 跨服务器目录列表 | 在服务器 A 的列表中显示服务器 B 的最近目录 | 1. 需全局状态，破坏实例隔离<br>2. 服务器 A 的 SFTP 无法访问服务器 B 的路径<br>3. 用户混淆风险 | 每个服务器连接独立维护 |
-| 目录预览 | 列表中预览每个目录里有什么 | 1. 需 SFTP 预取每个 listing，网络开销大<br>2. 弹窗变宽，小终端体验差<br>3. 实现复杂度高 | 仅显示路径字符串 |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| **Trash/recycle bin integration** | 1. `trash-cli` not available on all systems (zero dependency constraint)<br>2. Remote SFTP has no trash concept<br>3. Different trash APIs per platform (gio, trash-cli, macOS Trash) | Permanent delete with confirmation. User can use system file manager for recoverable delete. |
+| **Undo (u key)** | 1. Implementing undo for file operations requires operation logging and reverse execution<br>2. SFTP has no transaction support — undo after network failure is unreliable<br>3. Significant complexity for v1.2 | Confirmation dialog before destructive operations. This is the "confirm" side of the confirm-vs-undo debate. |
+| **Bulk rename (visual mode)** | 1. Ranger's `:bulkrename` launches external `$EDITOR` — lazyssh doesn't have an editor<br>2. Pattern-based rename (regex, numbering) is complex<br>3. Out of scope for v1.2 | Single-item rename with inline edit. Bulk rename can be v2+ with pattern syntax. |
+| **File permissions editing** | 1. Different permission models across platforms (Unix vs Windows)<br>2. SFTP chmod may not be available on all servers<br>3. Display-only permissions already shown | Read-only permission display (already exists). chmod as future feature. |
+| **Copy/move progress for same-filesystem operations** | Same-filesystem copy/move are fast (rename is atomic). Progress UI adds complexity without value. | Status bar message "Copying..." or "Moving..." with completion notification. |
+| **Drag-and-drop between panes** | TUI is keyboard-driven. Mouse support exists in tview but adds complexity for drag gestures. | Mark (c/x) + navigate + paste (p) model. |
+
+---
 
 ### Feature Dependencies
 
 ```
-[Recent Directories Popup (v1.1)]
-    └──requires──> [RemotePane.onPathChange callback]
-                       └──exists──> v1.0 (used for terminal Sync)
+[Delete (d)]
+    └──requires──> [ConfirmationDialog UI component]
+                      └──new──> overlay component (follows TransferModal pattern)
+    └──requires──> [DeleteService port]
+                      └──new──> ports.FileService extension or new FileOpsService
+    └──requires──> [SFTPClient.RemoveDirectory()]
+                      └──partially exists──> Remove() for files, need recursive RemoveAll()
 
-[Recent Directories Popup (v1.1)]
-    └──requires──> [RemotePane.NavigateInto / currentPath]
-                       └──exists──> v1.0
+[Rename (R)]
+    └──requires──> [InputField overlay]
+                      └──new──> tview.InputField as overlay component
+    └──requires──> [SFTPClient.Rename()]
+                      └──exists──> pkg/sftp client.Rename() (not yet wrapped in SFTPClient)
 
-[Popup List UI Component]
-    └──follows──> [TransferModal overlay pattern]
-                     └──exists──> v1.0 (Box embed + Draw + HandleKey + visible flag)
+[Mkdir (m)]
+    └──requires──> [InputField overlay]
+                      └──shared──> same component as Rename
+    └──requires──> [SFTPClient.MkdirAll()]
+                      └──exists──> already implemented in sftp_client.go
 
-[Persistent Bookmarks (v2)]
-    └──requires──> [Recent Directories (v1.1)]
-    └──requires──> [Disk storage]
-    └──conflicts──> [Security constraint: no sensitive data storage]
+[Copy (c + p)]
+    └──requires──> [Clipboard state management]
+                      └──new──> struct in FileBrowser with SourcePane, Files, Operation
+    └──requires──> [DeleteService] (for source cleanup in move)
+    └──requires──> [SFTPClient.WalkDir()]
+                      └──exists──> already implemented
+    └──cross-pane──> [TransferService]
+                        └──exists──> reuse UploadFile/UploadDir/DownloadFile/DownloadDir
+
+[Move (x + p)]
+    └──requires──> [Clipboard state management]
+                      └──shared──> same as Copy
+    └──requires──> [Copy implementation]
+                      └──depends──> move = copy + delete source
+    └──requires──> [DeleteService]
+    └──cross-pane──> [TransferService] + [DeleteService]
 ```
 
 ### Dependency Notes
 
-- **Recent Directories requires RemotePane.onPathChange:** 回调已在 v1.0 实现（用于 Sync 终端防残影）。只需在回调中追加路径到历史列表，零新基础设施。
-- **Popup List follows TransferModal pattern:** v1.0 的 TransferModal 展示了完整弹窗 overlay 模式：`*tview.Box` 嵌入 + 手动 `Draw()` + `HandleKey()` + `visible` 标志。新弹窗应遵循相同模式。
-- **Persistent Bookmarks conflicts with security constraint:** 书签需持久化目录路径（含服务器信息），违反"不引入新安全风险"原则。如要实现需 opt-in + 加密存储，远超 v1.1 范围。
+1. **InputField overlay is shared between Rename and Mkdir.** Both need a text input popup. Build once, use for both. The InputField overlay should support: pre-filled text, placeholder text, label, and a confirm/cancel callback pattern.
 
-### MVP Definition (v1.1)
+2. **ConfirmationDialog is shared between Delete and Move confirmation.** Both need a yes/no dialog. The existing TransferModal's cancel-confirm mode (modeCancelConfirm) demonstrates this pattern exactly. Build a reusable ConfirmDialog component.
 
-#### Launch With
+3. **Clipboard state must live in FileBrowser**, not in individual panes. Copy/move are inherently cross-pane operations. The FileBrowser is the only component that knows about both panes and can coordinate mark-put operations.
 
-- [ ] **自动记录远程目录导航** — NavigateInto/NavigateToParent 时自动追加路径
-- [ ] **`r` 键弹出最近目录列表** — 远程面板焦点时按 `r`，居中弹窗，最多 10 条 MRU
-- [ ] **j/k + Enter + Esc 交互** — 与文件面板一致的导航键
-- [ ] **重复路径自动去重** — 同一路径只保留最新位置
-- [ ] **空列表占位提示** — "暂无最近目录"
+4. **SFTPClient already has `Remove()` and `MkdirAll()` and `WalkDir()`.** What's missing is `Rename()` (pkg/sftp supports it but it's not wrapped) and `RemoveAll()` (recursive directory removal). These are thin wrappers.
+
+5. **Cross-pane copy/move reuses existing TransferService.** When pasting to the other pane, the copy phase is just an upload or download. This means we get progress tracking, conflict handling, and cancellation for free.
+
+6. **Same-pane copy needs new local copy logic.** `os.Rename()` only works on same filesystem. For robustness, implement `copyFile(src, dst)` using `io.Copy` with buffered reads, plus `copyDir(src, dst)` for recursive directory copy.
+
+---
+
+### MVP Definition (v1.2)
+
+#### Launch With (P1)
+
+- [ ] **Delete single file** — `d` key, confirmation dialog, local + remote
+- [ ] **Delete directory (recursive)** — `d` key, enhanced confirmation showing scope, local + remote
+- [ ] **Delete multi-selected files** — space-select + `d`, batch confirmation
+- [ ] **Rename file/directory** — `R` key, inline InputField overlay, local + remote
+- [ ] **Create directory** — `m` key, InputField popup, local + remote (nested path support)
+- [ ] **Copy mark** — `c` key marks file(s), status bar indicator
+- [ ] **Copy paste (same pane)** — `p` copies marked files to current directory
+- [ ] **Copy paste (cross-pane)** — `p` transfers marked files to other pane (reuses TransferService)
+- [ ] **Move mark** — `x` key marks file(s), status bar indicator
+- [ ] **Move paste (same pane)** — `p` renames (same as move within dir)
+- [ ] **Move paste (cross-pane)** — `p` transfers + deletes source
 
 #### Add After Validation (v1.x)
 
-- [ ] **高亮当前目录** — 列表中与当前路径相同的条目用不同颜色标记
-- [ ] **路径缩写显示** — 过长路径缩写中间部分，保持弹窗宽度可控
-- [ ] **数字键快速选择** — 按 1-9 直接跳转到对应序号目录
+- [ ] **Mark indicator in file listing** — visual marker (e.g., `C` or `M` prefix) on marked files
+- [ ] **Mark all files** — `0` or `Ctrl+A` to select all files in current directory
+- [ ] **Copy progress for large same-pane operations** — progress bar for large directory copies
+- [ ] **Conflict resolution for same-pane copy** — overwrite/skip/rename dialog (reuse TransferModal pattern)
+- [ ] **Keyboard shortcut help** — `?` key shows all keybindings including new ones
 
 #### Future Consideration (v2+)
 
-- [ ] **持久化书签** — 手动收藏目录，跨会话保存
-- [ ] **按本地目录分组** — 如果未来支持多标签页，需设计分组键
-- [ ] **目录访问计数** — MRU 基础上显示访问次数
+- [ ] **Undo last operation** — operation log with reverse execution
+- [ ] **Bulk rename with patterns** — regex, numbering, case conversion
+- [ ] **File permissions editing** — chmod for local and remote
+- [ ] **Symlink creation** — `ln -s` equivalent
+- [ ] **File ownership changes** — chown (local only, limited remote support)
+- [ ] **Search within directory** — filter/narrow file listing by pattern
+
+---
 
 ### Feature Prioritization Matrix
 
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| 自动记录目录导航 | HIGH | LOW | P1 |
-| `r` 键弹出列表 | HIGH | LOW | P1 |
-| j/k + Enter + Esc 交互 | HIGH | LOW | P1 |
-| 重复路径去重 | MEDIUM | LOW | P1 |
-| 空列表提示 | MEDIUM | LOW | P1 |
-| 高亮当前目录 | MEDIUM | LOW | P2 |
-| 路径缩写显示 | LOW | LOW | P2 |
-| 数字键快速选择 | LOW | MEDIUM | P3 |
-| 持久化书签 | MEDIUM | HIGH | P3 |
-| 频率加权排序 | LOW | HIGH | P3 |
-
-### Competitor Feature Analysis (Recent Directories)
-
-| Feature | Midnight Commander | Ranger | nnn | FileZilla | lazyssh (planned) |
-|---------|-------------------|--------|-----|-----------|-------------------|
-| 目录历史 | Alt+u 前后导航, Alt+Shift+h 下拉 | H/L 前后导航（栈式） | `-` 返回上一目录 | 无（仅 QuickConnect 服务器历史） | `r` 弹出 MRU 列表 |
-| 书签/收藏 | Hotlist (Ctrl+\), 持久化 | 书签系统, 可持久化 | B 键书签, symlink 持久化 | Site Manager, 持久化 XML | v1.1 不做 |
-| 持久化 | Hotlist 持久化; 历史仅会话内 | 历史仅会话内 | 书签 symlink 持久化 | 服务器列表持久化 | 仅会话内（内存） |
-| 上限 | 无明确上限 | 无明确上限 | 书签单字符 (0-9, a-z) | QuickConnect 最多 10 条 | 最多 10 条 |
-| 去重 | 历史栈自动去重 | 历史栈自动去重 | 书记天然去重 | QuickConnect 自动去重 | 自动去重 |
-
-**关键洞察：** 主流终端文件管理器都将"目录历史"和"书签"分为两个独立功能。目录历史是自动的、会话级的、MRU 排序的；书签是手动的、持久化的、用户自定义排序的。lazyssh v1.1 只做前者。
-
-**FileZilla 的教训：** QuickConnect 限制 10 条，超出后永久删除旧条目——用户多有抱怨。lazyssh 同样 10 条上限，但因内存存储，不存在数据丢失问题。
-
-### How "Recent Directories" Works in Practice
-
-Based on research across multiple file managers, the expected behavior is:
-
-1. **Auto-record on navigation:** 每次用户通过 Enter 进入子目录或 h/Backspace 返回上级时，新路径自动追加到列表头部。不需要用户手动操作。
-2. **MRU ordering (most recent first):** 列表严格按访问时间倒序排列。最近访问的在顶部。这是所有文件管理器的标准行为。
-3. **Duplicate collapsing:** 同一路径多次访问只保留一条记录。每次访问将该路径移到列表头部，而非插入新条目。
-4. **Selection navigates into directory:** 用户按 Enter 选中一条路径后，远程面板直接跳转到该目录并刷新文件列表。这与用户在面板中手动导航的效果完全一致。
-5. **Per-server grouping (natural isolation):** 每个服务器连接（FileBrowser 实例）维护独立的最近目录列表。切换服务器时列表自然隔离。这不需要额外代码——列表存在 FileBrowser 实例的内存中。
+| Feature | User Value | Implementation Cost | Priority | Phase Suggestion |
+|---------|------------|---------------------|----------|------------------|
+| Delete (file + dir) | HIGH | LOW-MEDIUM | P1 | Phase 1 (simplest, establishes confirmation dialog pattern) |
+| Rename | HIGH | LOW | P1 | Phase 2 (establishes InputField overlay pattern) |
+| Mkdir | HIGH | LOW | P1 | Phase 2 (shares InputField with rename) |
+| Copy (mark + paste) | HIGH | MEDIUM | P1 | Phase 3 (requires clipboard state, cross-pane reuses TransferService) |
+| Move (mark + paste) | HIGH | MEDIUM | P1 | Phase 3 (depends on copy + delete infrastructure) |
+| Multi-select delete | MEDIUM | LOW | P1 | Phase 1 (extends single delete) |
+| Cross-pane copy/move | HIGH | MEDIUM | P1 | Phase 3 (depends on clipboard + transfer service) |
+| Mark indicator in listing | MEDIUM | LOW | P2 | Phase 3 or post-v1.2 |
+| Conflict resolution (same-pane) | MEDIUM | MEDIUM | P2 | Post-v1.2 |
+| Bulk rename | MEDIUM | HIGH | P3 | v2+ |
+| Undo | HIGH | HIGH | P3 | v2+ |
+| Permissions editing | LOW | MEDIUM | P3 | v2+ |
 
 ---
 
-## Part 2: File Transfer (v1.0 — Already Built)
+### Competitor Feature Analysis (File Operations)
 
-### Table Stakes (Must Have)
+| Feature | Midnight Commander | Ranger | vifm | lf | lazyssh (planned) |
+|---------|-------------------|--------|------|----|-------------------|
+| **Delete** | F8, confirm dialog, recursive | `dD` or `d` submenu | `d`, confirm | `d`, trash-cli | `d`, confirm dialog |
+| **Rename** | Shift+F6 | `cw` (vim-style) | `cw` (vim-style) | `r` (inline) | `R`, inline InputField |
+| **Mkdir** | F7, input dialog | `:mkdir` command | `:mkdir` command | `:mkdir` command | `m`, InputField popup |
+| **Copy** | F5 (dual-pane, no mark) | `yy` + `pp` (mark-put) | `yy` + `p` (mark-put) | `y` + `p` (mark-put) | `c` + `p` (mark-put) |
+| **Move** | F6 (dual-pane, no mark) | `dd` + `pp` (mark-put) | `dd` + `p` (mark-put) | `d` + `P` (mark-put) | `x` + `p` (mark-put) |
+| **Cross-pane** | Implicit (other pane is target) | N/A (single pane) | Dual-pane aware | N/A (single pane) | Explicit mark + paste to other pane |
+| **Undo** | No | Yes (`u`) | Yes (`u`) | Yes (`u`) | No (v1.2) |
+| **Trash** | No (permanent) | No (permanent) | Optional | Yes (trash-cli) | No (permanent + confirm) |
+| **Multi-select** | Insert key | Space/v/V | t/v/V | Space | Space (existing) |
 
-Users expect these in any file transfer tool. Without them, the feature feels incomplete.
+**Key insight:** lazyssh follows the **mark-put model** (ranger/vifm/lf) rather than the **dual-pane implicit model** (mc). This is because:
+1. The mark-put model is more flexible — user can navigate anywhere before pasting
+2. It works naturally with the existing Space multi-select
+3. It unifies local copy and cross-pane transfer under one mental model
+4. Status bar feedback ("3 files marked for copy") makes the state visible
 
-#### Navigation & Browsing
+**MC's lesson:** MC uses F5/F6 which implicitly target the other pane. This is simpler but less flexible — you can't copy to a subdirectory of the other pane without first navigating there. The mark-put model is strictly more capable.
 
-| Feature | Complexity | Dependency |
-|---------|-----------|------------|
-| Local directory browsing | LOW | None |
-| Remote directory browsing (SFTP) | MEDIUM | SFTP connection |
-| Parent directory navigation (../) | LOW | Both browsers |
-| Hidden file toggle | LOW | Both browsers |
-| Current path display | LOW | Both browsers |
-| Sort by name/size/date | LOW | Both browsers |
+**ranger/vifm's lesson:** These use vim-style `yy`/`dd` which conflicts with lazyssh's `y` (potential future yank/copy-to-clipboard). lazyssh uses `c` for copy and `x` for move, which is more intuitive for non-vim users and avoids key conflicts.
 
-#### Transfer Operations
+---
 
-| Feature | Complexity | Dependency |
-|---------|-----------|------------|
-| Single file upload | LOW | SFTP connection |
-| Single file download | LOW | SFTP connection |
-| Directory upload (recursive) | MEDIUM | SFTP walk |
-| Directory download (recursive) | MEDIUM | SFTP walk |
-| Transfer progress indication | MEDIUM | Progress tracking |
-| Transfer cancel | MEDIUM | Process management |
+### How Each Operation Works in Practice
 
-#### UX Essentials
+#### Delete Flow
 
-| Feature | Complexity | Dependency |
-|---------|-----------|------------|
-| Keyboard navigation (arrows/j/k) | LOW | tview |
-| Quick transfer shortcut (Enter or specific key) | LOW | UI |
-| File selection (space to mark) | LOW | UI |
-| Status bar with connection info | LOW | UI |
-| Error display | LOW | UI |
+```
+1. User navigates to file/directory
+2. User optionally space-selects multiple items
+3. User presses `d`
+4. Confirmation dialog appears:
+   - Single file: "Delete 'filename.txt' (1.2 MB)? [y] Yes [n] No [Esc] Cancel"
+   - Directory: "Delete 'mydir/' (15 files, 3.4 MB)? [y] Yes [n] No [Esc] Cancel"
+   - Multi-select: "Delete 5 selected items? [y] Yes [n] No [Esc] Cancel"
+5. User presses `y` or Enter to confirm, `n` or Esc to cancel
+6. If confirmed:
+   - Files: os.Remove / SFTP Remove
+   - Directories: os.RemoveAll / SFTP RemoveAll (recursive)
+   - Multi-file: iterate, report partial failures
+7. Refresh listing, show status message
+```
 
-### Differentiators
+#### Rename Flow
 
-| Feature | Complexity | Why It Matters |
-|---------|-----------|----------------|
-| Zero-config remote access | LOW | Server list already has SSH config |
-| Seamless server switching | LOW | Switch servers without re-entering credentials |
-| Integrated with SSH management | MEDIUM | One tool for connection + transfer + config |
-| Quick-open from server list | LOW | Press `F` on any server for instant file browser |
+```
+1. User navigates to file/directory
+2. User presses `R`
+3. InputField overlay appears on the name column, pre-filled with current name
+4. User edits the name (cursor starts at stem, before extension)
+5. User presses Enter to confirm:
+   - Validate: non-empty, no invalid characters
+   - Check for name collision in same directory
+   - If collision: show overwrite confirmation
+   - Execute: os.Rename / SFTP Rename
+   - Refresh listing, keep cursor on renamed item
+6. User presses Esc to cancel: dismiss overlay, no changes
+```
 
-### Anti-Features (Deliberately NOT Built)
+#### Mkdir Flow
 
-| Feature | Reason |
-|---------|--------|
-| File preview (F3 in mc) | Adds significant complexity; lazyssh scope is transfer, not viewing |
-| Drag-and-drop emulation | TUI tools are keyboard-driven |
-| Archive VFS (browse zip/tar) | Orthogonal to SSH file transfer |
-| File editing | Out of scope per PROJECT.md |
-| Shell link / fish protocol | mc-specific VFS, adds protocol handling complexity |
-| Resume/partial transfer | scp/sftp don't natively support |
-| Multi-threaded transfer | v1 single-threaded for simplicity |
-| Transfer queue | Over-engineering for v1 |
-| Bookmark management | Server list already serves this purpose |
+```
+1. User presses `m`
+2. InputField popup appears centered: "Create directory: [input field]"
+3. User types directory name (supports nested: "path/to/newdir")
+4. User presses Enter to confirm:
+   - Validate: non-empty, no invalid characters
+   - Check if already exists
+   - Execute: os.MkdirAll / SFTP MkdirAll
+   - Refresh listing, scroll to and select new directory
+5. User presses Esc to cancel: dismiss popup
+```
 
-### Key UX Patterns from Research
+#### Copy Flow
 
-#### Midnight Commander Key Bindings (Reference)
-- F5 = Copy (transfer)
-- F6 = Move
-- F7 = Mkdir
-- F8 = Delete
-- F3 = View
-- Tab = Switch panels
-- Insert = Select file
+```
+1. User navigates to file/directory
+2. User optionally space-selects multiple items
+3. User presses `c` (copy mark)
+4. Status bar updates: "3 file(s) marked for copy"
+5. User navigates to target directory (same pane, other pane, or subdirectory)
+6. User presses `p` (paste):
+   a. Same pane, same directory → copy with .1 suffix
+   b. Same pane, different directory → copy to target
+   c. Other pane → upload/download (reuses TransferService)
+7. If cross-pane: TransferModal shows progress
+8. Status bar: "Copied 3 file(s)"
+9. Marks cleared, target pane refreshed
+```
 
-#### FileZilla UX Patterns
-- Drag between panes = copy (not move)
-- Double-click = transfer
-- Non-blocking background transfers
-- Non-blocking confirmation dialogs
+#### Move Flow
 
-#### lazyssh Adaptation
-- `Enter` on file = transfer to other pane
-- `Tab` = switch pane focus
-- `Space` = select/deselect file
-- `F5` = transfer current directory
-- `Backspace` or `h` = go to parent directory
-- `s`/`S` = sort field/direction
-- `r` = recent directories popup (v1.1)
+```
+1. User navigates to file/directory
+2. User optionally space-selects multiple items
+3. User presses `x` (move/cut mark)
+4. Status bar updates: "3 file(s) marked for move"
+5. User navigates to target directory
+6. User presses `p` (paste):
+   a. Same pane, same directory → no-op (or show rename if name differs)
+   b. Same pane, different directory → move within filesystem
+   c. Other pane → transfer + delete source
+7. If cross-pane:
+   a. TransferModal shows copy progress
+   b. After successful copy, delete source files
+   c. If delete fails: report error, source files remain
+8. Status bar: "Moved 3 file(s)"
+9. Both panes refreshed, marks cleared
+```
+
+---
+
+### Keyboard Binding Summary (v1.2 Additions)
+
+| Key | Context | Action | Conflicts |
+|-----|---------|--------|-----------|
+| `d` | Any pane | Delete selected item(s) | None (current bindings: no `d` in panes) |
+| `R` | Any pane | Rename current item | None (current bindings: no `R` in panes; lowercase `r` is recent dirs on remote) |
+| `m` | Any pane | Create directory | None (current bindings: no `m` in panes) |
+| `c` | Any pane | Mark for copy | None (current bindings: no `c` in panes) |
+| `x` | Any pane | Mark for move | None (current bindings: no `x` in panes) |
+| `p` | Any pane | Paste (copy or move) | None (current bindings: no `p` in panes) |
+| `y` | Confirm dialog | Confirm (yes) | None in pane context (future: yank to clipboard) |
+| `n` | Confirm dialog | Cancel (no) | None in pane context |
+
+**Key conflict analysis:** All proposed keys are free in the current key routing chain. The only potential conflict is `r` (lowercase) which is used for recent directories on remote pane. `R` (uppercase, Shift+R) is free in all contexts. `y` and `n` are only consumed by confirmation dialogs (overlay intercepts all keys when visible), so they don't conflict with any future use in pane context.
+
+---
+
+### Existing Infrastructure Reuse
+
+| Component | Current Use | v1.2 Reuse |
+|-----------|-------------|------------|
+| `TransferModal` | File transfer progress/cancel/conflict | Cross-pane copy/move progress display |
+| `TransferService.UploadFile/UploadDir` | File upload | Cross-pane copy (local → remote) |
+| `TransferService.DownloadFile/DownloadDir` | File download | Cross-pane copy (remote → local) |
+| `SFTPService.MkdirAll` | Transfer directory creation | Remote mkdir |
+| `SFTPService.WalkDir` | Transfer directory walking | Delete scope counting, recursive copy |
+| `SFTPService.Stat` | Conflict resolution | Rename collision detection, delete scope |
+| `SFTPService.Remove` | Not yet used by UI | Single file delete |
+| `SFTPService.CreateRemoteFile` | Transfer | Not needed for file ops |
+| `domain.ConflictHandler` | Transfer conflicts | Same-pane copy conflict resolution |
+| `nextAvailableName()` | Transfer rename on conflict | Same-pane copy naming |
+| `Pane.SelectedFiles()` | Transfer multi-select | Delete/copy/move multi-select |
+| `Pane.GetCurrentPath()` | Transfer path resolution | All operations |
+| `Pane.Refresh()` | Post-transfer refresh | Post-operation refresh |
+| `handleGlobalKeys` | Global key routing | Add d/R/m/c/x/p routing |
+| Overlay draw chain (`Draw()`) | TransferModal + RecentDirs | Add ConfirmDialog + InputField overlays |
+
+**New infrastructure needed:**
+- `ConfirmDialog` — reusable yes/no dialog overlay (for delete confirmation)
+- `InputFieldOverlay` — reusable text input popup (for rename and mkdir)
+- `Clipboard` — mark state struct in FileBrowser
+- `FileOpsService` (or extend `FileService`) — delete, rename, mkdir, local copy
+- `SFTPClient.Rename()` — wrapper for pkg/sftp `client.Rename()`
+- `SFTPClient.RemoveAll()` — recursive directory removal
+
+---
 
 ## Sources
 
-- [Midnight Commander man page](https://source.midnight-commander.org/man/mc.html)
-- [MC directory hotlist — Unix.SE](https://unix.stackexchange.com/questions/14483/does-mc-midnight-commander-have-favourites-for-directories)
-- [ranger GitHub](https://github.com/ranger/ranger)
-- [nnn ArchWiki](https://wiki.archlinux.org/title/Nnn)
-- [lf documentation](https://github.com/gokcehan/lf/blob/master/doc.md)
-- [FileZilla Forum — QuickConnect history](https://forum.filezilla-project.org/viewtopic.php?t=26927)
-- [Windows Quick Access — SuperUser](https://superuser.com/questions/1669420/how-does-the-windows-file-explorer-quick-access-recent-items-feature-work)
-- [UX StackExchange — Recent file list placement](https://ux.stackexchange.com/questions/135146/in-a-desktop-application-should-the-recent-file-list-placed-directly-in-the-fil)
-- 现有代码库: `internal/adapters/ui/file_browser/remote_pane.go`
-- 现有代码库: `internal/adapters/ui/file_browser/transfer_modal.go`
-- 现有代码库: `internal/adapters/ui/file_browser/file_browser_handlers.go`
-- `.planning/PROJECT.md` — v1.1 milestone 定义和约束
+- [Midnight Commander Cheat Sheet (GitHub Gist)](https://gist.github.com/samiraguiar/9cd4264445545cfd459d)
+- [MC Official Man Page](https://source.midnight-commander.org/man/mc.html)
+- [MC Recursive Delete Dialog — Ubuntu Manpage](https://manpages.ubuntu.com/manpages/focal//man1/mc.1.html)
+- [Ranger Cheatsheet (GitHub Gist)](https://gist.github.com/heroheman/aba73e47443340c35526755ef79647eb)
+- [Ranger PDF Keybindings](https://debian-install-notes.pages.dev/files/ranger-keybinds_quinton.pdf)
+- [Better Terminal File Management with Ranger](https://obaranovskyi.com/environments/better-terminal-file-management-with-ranger)
+- [lf Terminal File Manager Documentation](https://github.com/gokcehan/lf/blob/master/doc.md)
+- [lf Delete Behavior Discussion (GitHub Issue)](https://github.com/gokcehan/lf/issues/45)
+- [nnn Recursive Delete Per-File Prompt (Superuser)](https://superuser.com/questions/1623048/remove-a-folder-without-confirm-deletion-of-every-single-file-in-nnn-file-manage)
+- [UX StackExchange — Confirm or Undo](https://ux.stackexchange.com/questions/71960/deletion-confirm-or-undo-which-is-the-better-option-and-why)
+- [Nielsen Norman Group — Confirmation Dialog Guidelines](https://www.nngroup.com/articles/confirmation-dialog/)
+- [TUI File Navigation and Batch Rename with tview](https://joshalletto.com/posts/terminal-batch-rename/)
+- [tview InputField Wiki](https://github.com/rivo/tview/wiki/InputField)
+- Existing codebase: `internal/adapters/ui/file_browser/` (all files)
+- Existing codebase: `internal/core/ports/file_service.go`
+- Existing codebase: `internal/adapters/data/sftp_client/sftp_client.go`
+- Existing codebase: `internal/core/domain/transfer.go`
 
 ---
-*Features research: 2026-04-14 — v1.1 Recent Remote Directories focus*
+*Features research: 2026-04-15 — v1.2 File Operations focus*
