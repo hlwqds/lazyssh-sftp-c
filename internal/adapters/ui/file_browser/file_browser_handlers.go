@@ -31,6 +31,14 @@ import (
 //   - Otherwise, close the file browser
 func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	// Overlay key interception: check BEFORE any other key handling (D-08, Pitfall 2)
+	// InputDialog has highest priority (text input must consume all keys)
+	if fb.inputDialog != nil && fb.inputDialog.IsVisible() {
+		return fb.inputDialog.HandleKey(event)
+	}
+	// ConfirmDialog next (consumes y/n/Esc)
+	if fb.confirmDialog != nil && fb.confirmDialog.IsVisible() {
+		return fb.confirmDialog.HandleKey(event)
+	}
 	if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
 		return fb.recentDirs.HandleKey(event)
 	}
@@ -51,6 +59,15 @@ func (fb *FileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 		return nil
 	}
 	switch event.Rune() {
+	case 'd':
+		fb.handleDelete()
+		return nil
+	case 'R':
+		fb.handleRename()
+		return nil
+	case 'm':
+		fb.handleMkdir()
+		return nil
 	case 'r':
 		if fb.activePane == 1 && fb.remotePane.IsConnected() {
 			fb.recentDirs.SetCurrentPath(fb.remotePane.GetCurrentPath())

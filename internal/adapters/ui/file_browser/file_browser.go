@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/Adembc/lazyssh/internal/core/ports"
@@ -50,6 +51,8 @@ type FileBrowser struct {
 	statusBar      *tview.TextView
 	transferModal  *TransferModal
 	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
+	confirmDialog  *ConfirmDialog
+	inputDialog    *InputDialog
 	activePane     int         // 0 = local, 1 = remote
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
@@ -105,6 +108,10 @@ func (fb *FileBrowser) build() {
 
 	// Create recent directories tracker (Phase 4: data layer, Phase 5: popup UI)
 	fb.recentDirs = NewRecentDirs(fb.log, fb.server.Host, fb.server.User)
+
+	// Create overlay dialogs for file operations (Phase 6)
+	fb.confirmDialog = NewConfirmDialog(fb.app)
+	fb.inputDialog = NewInputDialog(fb.app)
 
 	// Wire onSelect callback: Hide -> NavigateTo -> Record -> SetFocus (D-10)
 	fb.recentDirs.SetOnSelect(func(path string) {
@@ -228,16 +235,22 @@ func (fb *FileBrowser) Draw(screen tcell.Screen) {
 	if fb.recentDirs != nil && fb.recentDirs.IsVisible() {
 		fb.recentDirs.Draw(screen)
 	}
+	if fb.confirmDialog != nil && fb.confirmDialog.IsVisible() {
+		fb.confirmDialog.Draw(screen)
+	}
+	if fb.inputDialog != nil && fb.inputDialog.IsVisible() {
+		fb.inputDialog.Draw(screen)
+	}
 }
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
 func (fb *FileBrowser) setStatusBarDefault() {
-	fb.statusBar.SetText("[white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText("[white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status to the status bar text.
 func (fb *FileBrowser) updateStatusBarConnection(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // GetLocalPane returns the local file pane.
@@ -507,7 +520,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch pane  [white]h[-] Up  [white].[-] Hidden  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // buildConflictHandler creates the onConflict callback for file transfers.
@@ -585,3 +598,33 @@ func nextAvailableName(path string, statFunc func(string) (os.FileInfo, error)) 
 	}
 	return path
 }
+
+// statusErrorTimer is a package-level timer for status bar error messages.
+// Only one error timer is active at a time; a new error cancels the previous timer.
+var statusErrorTimer *time.Timer
+
+// showStatusError displays a red error message in the status bar that auto-clears after 3 seconds.
+// Used for file operation failures (delete, rename, mkdir) per Pitfall 7.
+func (fb *FileBrowser) showStatusError(msg string) {
+	if statusErrorTimer != nil {
+		statusErrorTimer.Stop()
+	}
+	fb.statusBar.SetText(fmt.Sprintf("[#FF6B6B]%s[-]", msg))
+	statusErrorTimer = time.AfterFunc(3*time.Second, func() {
+		fb.app.QueueUpdateDraw(func() {
+			fb.setStatusBarDefault()
+		})
+	})
+}
+
+// handleDelete handles the 'd' key: delete selected file(s) or directory.
+// Stub -- full implementation in Task 2.
+func (fb *FileBrowser) handleDelete() {}
+
+// handleRename handles the 'R' key: rename selected file/directory.
+// Stub -- full implementation in Task 2.
+func (fb *FileBrowser) handleRename() {}
+
+// handleMkdir handles the 'm' key: create new directory.
+// Stub -- full implementation in Task 2.
+func (fb *FileBrowser) handleMkdir() {}
