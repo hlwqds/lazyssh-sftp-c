@@ -191,7 +191,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
+- [ ] 12-01-PLAN.md — DualRemoteFileBrowser 组件（布局 + 并行 SFTP 连接 + 键盘导航 + 文件操作 + 入口接线）
 **UI hint**: yes
 
 ### Phase 13: Cross-Remote Transfer
@@ -207,7 +207,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 11-01-PLAN.md — T 键标记状态管理、[S]/[T] 视觉前缀、handleServerMark 状态机、Esc 清除、handleDualRemoteBrowser 占位
+- [ ] 13-01-PLAN.md — 跨远端复制/移动（c/x + p）、两阶段进度、冲突处理、取消清理
 **UI hint**: yes
 
 ## Progress
