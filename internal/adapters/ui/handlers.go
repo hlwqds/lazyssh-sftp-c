@@ -336,23 +336,31 @@ func (t *tui) handleServerDup() {
 		copy(dup.SetEnv, server.SetEnv)
 	}
 
-	// Store the expected alias so handleServerSave can select it after save
-	t.dupPendingAlias = dup.Alias
+	// Clear search filter so new entry is guaranteed visible
+	if t.searchBar != nil {
+		t.searchBar.InputField.SetText("")
+	}
 
-	// Open form in Add mode with pre-filled server
-	form := NewServerForm(ServerFormAdd, &dup).
-		SetApp(t.app).
-		SetVersionInfo(t.version, t.commit).
-		OnSave(t.handleServerSave).
-		OnCancel(t.handleFormCancel)
-	t.app.SetRoot(form, true)
+	// Save directly without opening form
+	if err := t.serverService.AddServer(dup); err != nil {
+		t.showStatusTempColor(fmt.Sprintf("Dup failed: %v", err), "#FF6B6B")
+		return
+	}
+
+	// Refresh list and scroll to new entry
+	t.refreshServerList()
+	for i, s := range t.serverList.servers {
+		if s.Alias == dup.Alias {
+			t.serverList.SetCurrentItem(i)
+			break
+		}
+	}
+	t.showStatusTemp(fmt.Sprintf("Server duplicated: %s", dup.Alias))
 }
 
 func (t *tui) handleServerSave(server domain.Server, original *domain.Server) {
 	var err error
 	if original != nil {
-		// Edit mode - clear any pending dup alias
-		t.dupPendingAlias = ""
 		err = t.serverService.UpdateServer(*original, server)
 	} else {
 		// Add mode
@@ -369,19 +377,6 @@ func (t *tui) handleServerSave(server domain.Server, original *domain.Server) {
 	}
 
 	t.refreshServerList()
-
-	// If this was a dup save, scroll to the new entry
-	if original == nil && t.dupPendingAlias != "" {
-		servers, _ := t.serverService.ListServers("")
-		for i, s := range servers {
-			if s.Alias == t.dupPendingAlias {
-				t.serverList.SetCurrentItem(i)
-				break
-			}
-		}
-		t.dupPendingAlias = ""
-	}
-
 	t.handleFormCancel()
 }
 

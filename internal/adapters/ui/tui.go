@@ -49,8 +49,6 @@ type tui struct {
 	content *tview.Flex
 
 	sortMode SortMode
-
-	dupPendingAlias string // alias of duplicated server pending save, for post-save selection
 }
 
 func NewTUI(logger *zap.SugaredLogger, ss ports.ServerService, fs ports.FileService, sftp ports.SFTPService, ts ports.TransferService, version, commit string) App {
