@@ -113,6 +113,19 @@ func (m *mockSFTPService) Remove(path string) error {
 	return nil
 }
 
+func (m *mockSFTPService) RemoveAll(path string) error {
+	m.removedPaths = append(m.removedPaths, path)
+	return nil
+}
+
+func (m *mockSFTPService) Rename(oldPath, newPath string) error {
+	return nil
+}
+
+func (m *mockSFTPService) Mkdir(path string) error {
+	return nil
+}
+
 func (m *mockSFTPService) HomeDir() string {
 	return "/home/test"
 }

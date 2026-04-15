@@ -21,13 +21,24 @@ import (
 	"github.com/Adembc/lazyssh/internal/core/domain"
 )
 
-// FileService provides file listing operations for local and remote filesystems.
+// FileService provides file listing and management operations for local and remote filesystems.
 // Implementations must sort directories before files within each sort group.
 type FileService interface {
 	// ListDir returns a sorted, optionally filtered list of files in the given path.
 	// sortField: domain.SortByName, domain.SortBySize, or domain.SortByDate
 	// sortAsc: true for ascending, false for descending
 	ListDir(path string, showHidden bool, sortField domain.FileSortField, sortAsc bool) ([]domain.FileInfo, error)
+
+	// Remove deletes a single file or empty directory.
+	Remove(path string) error
+	// RemoveAll recursively deletes a directory and all its contents.
+	RemoveAll(path string) error
+	// Rename renames or moves a file/directory within the same filesystem.
+	Rename(oldPath, newPath string) error
+	// Mkdir creates a single directory. Returns error if parent doesn't exist or directory already exists.
+	Mkdir(path string) error
+	// Stat returns file info for the given path.
+	Stat(path string) (os.FileInfo, error)
 }
 
 // SFTPService provides SFTP connection and remote file operations.
