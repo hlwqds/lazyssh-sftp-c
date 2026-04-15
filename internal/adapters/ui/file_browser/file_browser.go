@@ -35,6 +35,25 @@ const (
 	directionDownload = "Downloading"
 )
 
+// ClipboardOp represents the clipboard operation type.
+type ClipboardOp int
+
+const (
+	// OpCopy marks the clipboard for copy operation.
+	OpCopy ClipboardOp = iota
+	// OpMove is reserved for Phase 8.
+)
+
+// Clipboard holds the state for copy/move clipboard operations.
+// Stored on FileBrowser (not per-pane) for cross-directory navigation persistence (CLP-02, D-04).
+type Clipboard struct {
+	Active     bool
+	SourcePane int            // 0 = local, 1 = remote
+	FileInfo   domain.FileInfo
+	SourceDir  string
+	Operation  ClipboardOp
+}
+
 // FileBrowser is the root component for the dual-pane file browser.
 // It is a self-contained tview.Primitive that can be set as root via app.SetRoot().
 // Layout: FlexRow with content (FlexColumn: LocalPane + RemotePane) and StatusBar.
@@ -53,7 +72,8 @@ type FileBrowser struct {
 	recentDirs     *RecentDirs // in-memory MRU list of recent remote directories
 	confirmDialog  *ConfirmDialog
 	inputDialog    *InputDialog
-	activePane     int         // 0 = local, 1 = remote
+	clipboard      Clipboard // Phase 7: copy/paste state
+	activePane     int // 0 = local, 1 = remote
 	transferring   bool
 	transferCancel context.CancelFunc // cancel function for active transfer context
 	onClose        func()
@@ -102,6 +122,14 @@ func (fb *FileBrowser) build() {
 	// Create panes
 	fb.localPane = NewLocalPane(fb.log, fb.fileService, homeDir)
 	fb.remotePane = NewRemotePane(fb.log, fb.sftpService, fb.server)
+
+	// Wire clipboard provider for [C] prefix rendering (Phase 7)
+	fb.localPane.SetClipboardProvider(func() (bool, string, string) {
+		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir
+	})
+	fb.remotePane.SetClipboardProvider(func() (bool, string, string) {
+		return fb.clipboard.Active, fb.clipboard.FileInfo.Name, fb.clipboard.SourceDir
+	})
 
 	// Create transfer modal
 	fb.transferModal = NewTransferModal(fb.app)
@@ -157,7 +185,7 @@ func (fb *FileBrowser) build() {
 
 	// Build dual-pane content layout (50:50 per D-04)
 	content := tview.NewFlex().SetDirection(tview.FlexColumn)
-		content.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
+	content.SetBackgroundColor(tcell.ColorDefault) // blend with kitty's native background
 	content.
 		AddItem(fb.localPane, 0, 1, true).  // 50% width, initially focused
 		AddItem(fb.remotePane, 0, 1, false) // 50% width
@@ -245,12 +273,12 @@ func (fb *FileBrowser) Draw(screen tcell.Screen) {
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
 func (fb *FileBrowser) setStatusBarDefault() {
-	fb.statusBar.SetText("[white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText("[white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status to the status bar text.
 func (fb *FileBrowser) updateStatusBarConnection(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // GetLocalPane returns the local file pane.
@@ -520,7 +548,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // buildConflictHandler creates the onConflict callback for file transfers.

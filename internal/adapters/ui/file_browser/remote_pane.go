@@ -29,16 +29,17 @@ import (
 // It displays connection states (Connecting, Connected, Error) and file listings.
 type RemotePane struct {
 	*tview.Table
-	log          *zap.SugaredLogger
-	sftpService  ports.SFTPService
-	server       domain.Server
-	currentPath  string
-	sortMode     FileSortMode
-	showHidden   bool
-	selected     map[string]bool // multi-select state: file name -> selected
-	connected    bool
-	onPathChange func(path string)
-	onFileAction func(fi domain.FileInfo)
+	log               *zap.SugaredLogger
+	sftpService       ports.SFTPService
+	server            domain.Server
+	currentPath       string
+	sortMode          FileSortMode
+	showHidden        bool
+	selected          map[string]bool // multi-select state: file name -> selected
+	connected         bool
+	onPathChange      func(path string)
+	onFileAction      func(fi domain.FileInfo)
+	clipboardProvider func() (bool, string, string) // returns (active, fileName, sourceDir) for [C] prefix check
 }
 
 // NewRemotePane creates a new RemotePane for browsing remote files.
@@ -225,6 +226,19 @@ func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
 			nameText = "* " + nameText
 			nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
 		}
+		// Clipboard [C] prefix takes precedence over Space * selection (UI-SPEC)
+		if rp.clipboardProvider != nil {
+			if active, clipName, clipDir := rp.clipboardProvider(); active && clipName == fi.Name && clipDir == rp.currentPath {
+				nameText = "[C] " + nameText
+				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
+			} else if rp.selected[fi.Name] {
+				nameText = "* " + nameText
+				nameColor = tcell.GetColor("#FFD700")
+			}
+		} else if rp.selected[fi.Name] {
+			nameText = "* " + nameText
+			nameColor = tcell.GetColor("#FFD700")
+		}
 		nameCell := tview.NewTableCell(nameText).
 			SetTextColor(nameColor).
 			SetAlign(tview.AlignLeft).
@@ -398,6 +412,11 @@ func (rp *RemotePane) OnPathChange(fn func(path string)) *RemotePane {
 func (rp *RemotePane) OnFileAction(fn func(fi domain.FileInfo)) *RemotePane {
 	rp.onFileAction = fn
 	return rp
+}
+
+// SetClipboardProvider sets the callback for checking clipboard state during rendering.
+func (rp *RemotePane) SetClipboardProvider(provider func() (bool, string, string)) {
+	rp.clipboardProvider = provider
 }
 
 // GetSortMode returns the current sort mode.
