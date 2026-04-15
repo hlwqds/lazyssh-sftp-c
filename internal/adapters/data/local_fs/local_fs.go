@@ -16,8 +16,10 @@ package local_fs
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -138,6 +140,75 @@ func (l *LocalFS) Mkdir(path string) error {
 // Stat returns file info for the given path.
 func (l *LocalFS) Stat(path string) (os.FileInfo, error) {
 	return os.Stat(path)
+}
+
+// Copy copies a single file from src to dst, preserving permissions and modification time.
+func (l *LocalFS) Copy(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("copy data: %w", err)
+	}
+
+	// Preserve permissions (D-07)
+	if err := os.Chmod(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("chmod: %w", err)
+	}
+	// Preserve modification time (D-07)
+	if err := os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
+		return fmt.Errorf("chtimes: %w", err)
+	}
+
+	return nil
+}
+
+// CopyDir recursively copies a directory from src to dst.
+// Preserves directory structure, file permissions, and modification times.
+func (l *LocalFS) CopyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat source dir: %w", err)
+	}
+
+	if err := os.Mkdir(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("create destination dir: %w", err)
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("read source dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := l.CopyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := l.Copy(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Compile-time interface satisfaction check.

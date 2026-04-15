@@ -39,6 +39,12 @@ type FileService interface {
 	Mkdir(path string) error
 	// Stat returns file info for the given path.
 	Stat(path string) (os.FileInfo, error)
+	// Copy copies a single file from src to dst on the same filesystem.
+	// Preserves file permissions and modification time (D-07).
+	Copy(src, dst string) error
+	// CopyDir recursively copies a directory from src to dst on the same filesystem.
+	// Preserves directory structure, file permissions, and modification times.
+	CopyDir(src, dst string) error
 }
 
 // SFTPService provides SFTP connection and remote file operations.
