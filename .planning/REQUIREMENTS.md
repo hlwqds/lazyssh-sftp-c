@@ -51,14 +51,14 @@
 
 | REQ-ID | Phase | Plan | Task | Status |
 |--------|-------|------|------|--------|
-| DEL-01 | Phase 6 | - | - | Pending |
-| DEL-02 | Phase 6 | - | - | Pending |
-| DEL-03 | Phase 6 | - | - | Pending |
-| DEL-04 | Phase 6 | - | - | Pending |
-| REN-01 | Phase 6 | - | - | Pending |
-| REN-02 | Phase 6 | - | - | Pending |
-| MKD-01 | Phase 6 | - | - | Pending |
-| MKD-02 | Phase 6 | - | - | Pending |
+| DEL-01 | Phase 6 | 06-01, 06-02, 06-03 | - | Implemented |
+| DEL-02 | Phase 6 | 06-01, 06-02, 06-03 | - | Implemented |
+| DEL-03 | Phase 6 | 06-02, 06-03 | - | Implemented |
+| DEL-04 | Phase 6 | 06-03 | - | Implemented |
+| REN-01 | Phase 6 | 06-01, 06-02, 06-03 | - | Implemented |
+| REN-02 | Phase 6 | 06-02, 06-03 | - | Implemented |
+| MKD-01 | Phase 6 | 06-01, 06-02, 06-03 | - | Implemented |
+| MKD-02 | Phase 6 | 06-03 | - | Implemented |
 | CPY-01 | Phase 7 | - | - | Pending |
 | CPY-02 | Phase 7 | - | - | Pending |
 | CPY-03 | Phase 7 | - | - | Pending |

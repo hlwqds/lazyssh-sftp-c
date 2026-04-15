@@ -289,6 +289,39 @@ func (c *SFTPClient) Remove(path string) error {
 	return client.Remove(path)
 }
 
+// RemoveAll recursively deletes a remote directory and all its contents.
+func (c *SFTPClient) RemoveAll(path string) error {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("not connected: call Connect first")
+	}
+	return client.RemoveAll(path)
+}
+
+// Rename renames or moves a remote file/directory within the same filesystem.
+func (c *SFTPClient) Rename(oldPath, newPath string) error {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("not connected: call Connect first")
+	}
+	return client.Rename(oldPath, newPath)
+}
+
+// Mkdir creates a single remote directory. Returns error if parent doesn't exist or directory already exists.
+func (c *SFTPClient) Mkdir(path string) error {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil {
+		return fmt.Errorf("not connected: call Connect first")
+	}
+	return client.Mkdir(path)
+}
+
 // walkDir recursively walks remote directory, appending file paths to files.
 func (c *SFTPClient) walkDir(client *sftp.Client, path string, files *[]string) error {
 	entries, err := client.ReadDir(path)

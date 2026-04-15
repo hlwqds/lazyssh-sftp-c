@@ -115,5 +115,30 @@ func sortSlice(entries []domain.FileInfo, sortField domain.FileSortField, sortAs
 	})
 }
 
+// Remove deletes a single file or empty directory.
+func (l *LocalFS) Remove(path string) error {
+	return os.Remove(path)
+}
+
+// RemoveAll recursively deletes a directory and all its contents.
+func (l *LocalFS) RemoveAll(path string) error {
+	return os.RemoveAll(path)
+}
+
+// Rename renames or moves a file/directory within the same filesystem.
+func (l *LocalFS) Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+// Mkdir creates a single directory. Returns error if parent doesn't exist or directory already exists.
+func (l *LocalFS) Mkdir(path string) error {
+	return os.Mkdir(path, 0o750)
+}
+
+// Stat returns file info for the given path.
+func (l *LocalFS) Stat(path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
+
 // Compile-time interface satisfaction check.
 var _ ports.FileService = (*LocalFS)(nil)

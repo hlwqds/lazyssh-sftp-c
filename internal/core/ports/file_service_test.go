@@ -31,6 +31,26 @@ func (m *mockFileService) ListDir(path string, showHidden bool, sortField domain
 	return nil, nil
 }
 
+func (m *mockFileService) Remove(path string) error {
+	return nil
+}
+
+func (m *mockFileService) RemoveAll(path string) error {
+	return nil
+}
+
+func (m *mockFileService) Rename(oldPath, newPath string) error {
+	return nil
+}
+
+func (m *mockFileService) Mkdir(path string) error {
+	return nil
+}
+
+func (m *mockFileService) Stat(path string) (os.FileInfo, error) {
+	return nil, fmt.Errorf("not found")
+}
+
 // mockSFTPService is a minimal mock implementing SFTPService for compilation verification.
 type mockSFTPService struct {
 	mockFileService
@@ -69,6 +89,18 @@ func (m *mockSFTPService) Stat(path string) (os.FileInfo, error) {
 }
 
 func (m *mockSFTPService) Remove(path string) error {
+	return nil
+}
+
+func (m *mockSFTPService) RemoveAll(path string) error {
+	return nil
+}
+
+func (m *mockSFTPService) Rename(oldPath, newPath string) error {
+	return nil
+}
+
+func (m *mockSFTPService) Mkdir(path string) error {
 	return nil
 }
 

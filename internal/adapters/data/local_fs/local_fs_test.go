@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
+	"github.com/Adembc/lazyssh/internal/core/ports"
 	"go.uber.org/zap"
 )
 
@@ -279,4 +280,203 @@ func TestListDir_ImplementsFileService(t *testing.T) {
 	if fs == nil {
 		t.Fatal("New() returned nil")
 	}
+}
+
+// TestRemove_DeletesFile verifies Remove deletes a file and returns error for nonexistent.
+func TestRemove_DeletesFile(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "to_delete.txt")
+	os.WriteFile(filePath, []byte("data"), 0o644)
+
+	fs := New(newTestLogger())
+
+	// Verify file exists
+	if _, err := os.Stat(filePath); err != nil {
+		t.Fatalf("test file should exist: %v", err)
+	}
+
+	// Remove the file
+	err := fs.Remove(filePath)
+	if err != nil {
+		t.Fatalf("Remove failed: %v", err)
+	}
+
+	// Verify file is gone
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Error("file should be deleted after Remove")
+	}
+}
+
+// TestRemove_Nonexistent verifies Remove returns error for nonexistent path.
+func TestRemove_Nonexistent(t *testing.T) {
+	fs := New(newTestLogger())
+	err := fs.Remove("/non/existent/file.txt")
+	if err == nil {
+		t.Error("Remove should return error for nonexistent path")
+	}
+}
+
+// TestRemoveAll_RemovesDirectoryTree verifies RemoveAll recursively deletes a directory tree.
+func TestRemoveAll_RemovesDirectoryTree(t *testing.T) {
+	dir := t.TempDir()
+	// Create nested directory structure
+	subDir := filepath.Join(dir, "parent", "child", "grandchild")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("failed to create test dirs: %v", err)
+	}
+	os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("data"), 0o644)
+
+	fs := New(newTestLogger())
+
+	err := fs.RemoveAll(filepath.Join(dir, "parent"))
+	if err != nil {
+		t.Fatalf("RemoveAll failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "parent")); !os.IsNotExist(err) {
+		t.Error("directory tree should be removed after RemoveAll")
+	}
+}
+
+// TestRename_RenamesFile verifies Rename renames a file.
+func TestRename_RenamesFile(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old_name.txt")
+	newPath := filepath.Join(dir, "new_name.txt")
+	os.WriteFile(oldPath, []byte("data"), 0o644)
+
+	fs := New(newTestLogger())
+
+	err := fs.Rename(oldPath, newPath)
+	if err != nil {
+		t.Fatalf("Rename failed: %v", err)
+	}
+
+	// Old path should not exist
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Error("old path should not exist after Rename")
+	}
+	// New path should exist
+	if _, err := os.Stat(newPath); err != nil {
+		t.Error("new path should exist after Rename")
+	}
+}
+
+// TestRename_RenamesDirectory verifies Rename renames a directory.
+func TestRename_RenamesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old_dir")
+	newPath := filepath.Join(dir, "new_dir")
+	os.Mkdir(oldPath, 0o755)
+	os.WriteFile(filepath.Join(oldPath, "file.txt"), []byte("data"), 0o644)
+
+	fs := New(newTestLogger())
+
+	err := fs.Rename(oldPath, newPath)
+	if err != nil {
+		t.Fatalf("Rename directory failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(newPath, "file.txt")); err != nil {
+		t.Error("file inside renamed directory should be accessible")
+	}
+}
+
+// TestMkdir_CreatesDirectory verifies Mkdir creates a directory.
+func TestMkdir_CreatesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	newDir := filepath.Join(dir, "new_subdir")
+
+	fs := New(newTestLogger())
+
+	err := fs.Mkdir(newDir)
+	if err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+
+	info, err := os.Stat(newDir)
+	if err != nil {
+		t.Fatalf("new directory should exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("created path should be a directory")
+	}
+}
+
+// TestMkdir_AlreadyExists verifies Mkdir returns error when directory already exists.
+func TestMkdir_AlreadyExists(t *testing.T) {
+	dir := t.TempDir()
+
+	fs := New(newTestLogger())
+
+	err := fs.Mkdir(dir)
+	if err == nil {
+		t.Error("Mkdir should return error when directory already exists")
+	}
+}
+
+// TestMkdir_ParentNotExist verifies Mkdir returns error when parent doesn't exist.
+func TestMkdir_ParentNotExist(t *testing.T) {
+	dir := t.TempDir()
+	newDir := filepath.Join(dir, "nonexistent_parent", "child")
+
+	fs := New(newTestLogger())
+
+	err := fs.Mkdir(newDir)
+	if err == nil {
+		t.Error("Mkdir should return error when parent directory doesn't exist")
+	}
+}
+
+// TestStat_ReturnsFileInfo verifies Stat returns file info for an existing file.
+func TestStat_ReturnsFileInfo(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test_file.txt")
+	os.WriteFile(filePath, []byte("hello world"), 0o644)
+
+	fs := New(newTestLogger())
+
+	info, err := fs.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if info.Name() != "test_file.txt" {
+		t.Errorf("Stat returned wrong name: got %q, want %q", info.Name(), "test_file.txt")
+	}
+	if info.Size() != int64(len("hello world")) {
+		t.Errorf("Stat returned wrong size: got %d, want %d", info.Size(), len("hello world"))
+	}
+	if info.IsDir() {
+		t.Error("Stat should report file, not directory")
+	}
+}
+
+// TestStat_Nonexistent verifies Stat returns error for nonexistent path.
+func TestStat_Nonexistent(t *testing.T) {
+	fs := New(newTestLogger())
+	_, err := fs.Stat("/non/existent/file.txt")
+	if err == nil {
+		t.Error("Stat should return error for nonexistent path")
+	}
+}
+
+// TestStat_Directory verifies Stat works on directories.
+func TestStat_Directory(t *testing.T) {
+	dir := t.TempDir()
+
+	fs := New(newTestLogger())
+
+	info, err := fs.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat on directory failed: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("Stat should report directory")
+	}
+}
+
+// TestLocalFS_ImplementsFileService verifies LocalFS satisfies the full FileService interface
+// including the new Remove/RemoveAll/Rename/Mkdir/Stat methods.
+func TestLocalFS_ImplementsFileService(t *testing.T) {
+	var _ ports.FileService = (*LocalFS)(nil)
 }
