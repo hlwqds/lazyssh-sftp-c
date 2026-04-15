@@ -169,10 +169,12 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 		}
 		// Clipboard [C] prefix takes precedence over Space * selection (UI-SPEC)
 		var nameAttrs tcell.AttrMask
+		var nameBg tcell.Color
 		if lp.clipboardProvider != nil {
 			if active, clipName, clipDir := lp.clipboardProvider(); active && clipName == fi.Name && clipDir == lp.currentPath {
 				nameText = "[C] " + nameText
 				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
+				nameBg = tcell.Color236               // dark background for visibility
 				nameAttrs = tcell.AttrBold
 			} else if lp.selected[fi.Name] {
 				nameText = "* " + nameText
@@ -184,6 +186,7 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 		}
 		nameCell := tview.NewTableCell(nameText).
 			SetTextColor(nameColor).
+			SetBackgroundColor(nameBg).
 			SetAttributes(nameAttrs).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1).
