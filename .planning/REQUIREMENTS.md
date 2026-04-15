@@ -7,10 +7,10 @@
 
 ### Dup SSH Connection
 
-- [ ] **DUP-01**: 用户可以在服务器列表按 D 键复制当前选中服务器的全部配置
-- [ ] **DUP-02**: 复制后自动生成唯一别名（原名-copy, 原名-copy-2, ...递增后缀）
-- [ ] **DUP-03**: 复制后自动打开编辑表单（ServerForm），用户可修改字段后保存为新条目
-- [ ] **DUP-04**: 复制条目清除运行时元数据（metadata/ping 等非配置字段）
+- [x] **DUP-01**: 用户可以在服务器列表按 D 键复制当前选中服务器的全部配置
+- [x] **DUP-02**: 复制后自动生成唯一别名（原名-copy, 原名-copy-2, ...递增后缀）
+- [x] **DUP-03**: 复制后自动打开编辑表单（ServerForm），用户可修改字段后保存为新条目
+- [x] **DUP-04**: 复制条目清除运行时元数据（metadata/ping 等非配置字段）
 
 ## Out of Scope
 
@@ -25,10 +25,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DUP-01 | Phase 9 | Pending |
-| DUP-02 | Phase 9 | Pending |
-| DUP-03 | Phase 9 | Pending |
-| DUP-04 | Phase 9 | Pending |
+| DUP-01 | Phase 9 | Complete |
+| DUP-02 | Phase 9 | Complete |
+| DUP-03 | Phase 9 | Complete |
+| DUP-04 | Phase 9 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 4 total

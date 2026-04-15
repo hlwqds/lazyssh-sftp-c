@@ -137,7 +137,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 09-01: D key dup handler, alias generation, metadata clearing, form wiring, hint updates
+- [x] 09-01: D key dup handler, alias generation, metadata clearing, form wiring, hint updates
 
 ## Progress
 
