@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/Adembc/lazyssh/internal/core/domain"
+	"github.com/Adembc/lazyssh/internal/core/ports"
 	"go.uber.org/zap"
 )
 
@@ -273,4 +274,45 @@ func TestBuildSSHArgs_Compression(t *testing.T) {
 	if !found {
 		t.Errorf("expected -C flag when Compression=yes, got: %v", args)
 	}
+}
+
+// TestRemoveAll_NotConnected verifies RemoveAll returns error when not connected.
+func TestRemoveAll_NotConnected(t *testing.T) {
+	c := New(newTestLogger())
+	err := c.RemoveAll("/some/path")
+	if err == nil {
+		t.Error("RemoveAll should return error when not connected")
+	}
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("RemoveAll error should mention 'not connected', got: %v", err)
+	}
+}
+
+// TestRename_NotConnected verifies Rename returns error when not connected.
+func TestRename_NotConnected(t *testing.T) {
+	c := New(newTestLogger())
+	err := c.Rename("/old/path", "/new/path")
+	if err == nil {
+		t.Error("Rename should return error when not connected")
+	}
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("Rename error should mention 'not connected', got: %v", err)
+	}
+}
+
+// TestMkdir_NotConnected verifies Mkdir returns error when not connected.
+func TestMkdir_NotConnected(t *testing.T) {
+	c := New(newTestLogger())
+	err := c.Mkdir("/some/dir")
+	if err == nil {
+		t.Error("Mkdir should return error when not connected")
+	}
+	if !strings.Contains(err.Error(), "not connected") {
+		t.Errorf("Mkdir error should mention 'not connected', got: %v", err)
+	}
+}
+
+// TestSFTPClient_ImplementsSFTPService verifies SFTPClient satisfies the full SFTPService interface.
+func TestSFTPClient_ImplementsSFTPService(t *testing.T) {
+	var _ ports.SFTPService = (*SFTPClient)(nil)
 }
