@@ -30,7 +30,7 @@
 **Milestone Goal:** 双面板内完成文件管理操作（删除/重命名/新建/复制/移动），无需退出 lazyssh
 
 - [ ] **Phase 6: Basic File Operations** - Port 接口扩展 + 删除/重命名/新建目录
-- [ ] **Phase 7: Copy & Clipboard** - 复制功能（CopyService + 剪贴板 + 可视化标记）
+- [ ] **Phase 7: Copy & Clipboard** - 复制功能（剪贴板 + 可视化标记 + 远程复制进度）
 - [ ] **Phase 8: Move & Integration** - 移动功能 + 进度显示 + 冲突处理
 
 ## Phase Details
@@ -113,8 +113,11 @@ Plans:
   2. 用户导航到目标目录后按 `p` 键，标记的文件/目录被复制到当前目录，目录递归复制所有内容
   3. 远程面板内复制大文件/目录时显示统一进度视图（包含已复制文件数和总大小）
   4. 剪贴板标记在导航到其他目录后仍然保留，按 Esc 或新的 c/x 操作清除之前标记
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07-01-PLAN.md -- FileService/TransferService port 扩展 + LocalFS/transfer adapter 实现
+- [ ] 07-02-PLAN.md -- Clipboard UI：handleCopy/handlePaste + [C] 前缀 + TransferModal modeCopy + Esc 清除
 
 ### Phase 8: Move & Integration
 **Goal**: 用户可以通过 x 标记 + p 粘贴在面板内移动文件/目录，移动失败时保留源文件
@@ -136,7 +139,7 @@ Phases execute in numeric order: 6 -> 7 -> 8
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 6. Basic File Operations | v1.2 | 2/3 | Complete    | 2026-04-15 |
-| 7. Copy & Clipboard | v1.2 | 0/? | Not started | - |
+| 7. Copy & Clipboard | v1.2 | 0/2 | Not started | - |
 | 8. Move & Integration | v1.2 | 0/? | Not started | - |
 
 Full details: .planning/milestones/v1.0-ROADMAP.md, .planning/milestones/v1.1-ROADMAP.md
