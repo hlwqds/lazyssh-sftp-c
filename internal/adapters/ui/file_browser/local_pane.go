@@ -167,10 +167,6 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 		if fi.IsDir {
 			nameColor = tcell.Color33 // blue for directories (D-03)
 		}
-		if lp.selected[fi.Name] {
-			nameText = "* " + nameText
-			nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
-		}
 		// Clipboard [C] prefix takes precedence over Space * selection (UI-SPEC)
 		if lp.clipboardProvider != nil {
 			if active, clipName, clipDir := lp.clipboardProvider(); active && clipName == fi.Name && clipDir == lp.currentPath {
@@ -178,11 +174,11 @@ func (lp *LocalPane) populateTable(entries []domain.FileInfo) {
 				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
 			} else if lp.selected[fi.Name] {
 				nameText = "* " + nameText
-				nameColor = tcell.GetColor("#FFD700")
+				nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
 			}
 		} else if lp.selected[fi.Name] {
 			nameText = "* " + nameText
-			nameColor = tcell.GetColor("#FFD700")
+			nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
 		}
 		nameCell := tview.NewTableCell(nameText).
 			SetTextColor(nameColor).

@@ -904,8 +904,9 @@ func (fb *FileBrowser) handleCopy() {
 		Operation:  OpCopy,
 	}
 
-	// Refresh to show [C] prefix
+	// Refresh to show [C] prefix, then restore cursor position
 	fb.refreshPane(fb.activePane)
+	fb.focusOnItem(fb.activePane, fi.Name)
 	fb.updateStatusBarTemp(fmt.Sprintf("[#00FF7F]Clipboard: %s[-]", fi.Name))
 }
 
@@ -1036,9 +1037,7 @@ func (fb *FileBrowser) remotePasteDir(ctx context.Context, sourcePath, targetPat
 		}
 		fb.app.QueueUpdateDraw(func() {
 			fb.transferModal.fileLabel = p.FileName
-			if p.BytesTotal > 0 || p.Done || p.Failed {
-				fb.transferModal.Update(p)
-			}
+			fb.transferModal.Update(p)
 		})
 	}
 	tmpDir, tmpErr := os.MkdirTemp("", "lazyssh-copydir-*")
@@ -1069,9 +1068,7 @@ func (fb *FileBrowser) remotePasteDir(ctx context.Context, sourcePath, targetPat
 		}
 		fb.app.QueueUpdateDraw(func() {
 			fb.transferModal.fileLabel = p.FileName
-			if p.BytesTotal > 0 || p.Done || p.Failed {
-				fb.transferModal.Update(p)
-			}
+			fb.transferModal.Update(p)
 		})
 	}
 	ulFailed, err := fb.transferSvc.UploadDir(ctx, tmpBase, targetPath, ulProgress, onConflict)

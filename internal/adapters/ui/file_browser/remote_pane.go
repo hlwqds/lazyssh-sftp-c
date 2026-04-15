@@ -222,10 +222,6 @@ func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
 		if fi.IsDir {
 			nameColor = tcell.Color33 // blue for directories (D-03)
 		}
-		if rp.selected[fi.Name] {
-			nameText = "* " + nameText
-			nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
-		}
 		// Clipboard [C] prefix takes precedence over Space * selection (UI-SPEC)
 		if rp.clipboardProvider != nil {
 			if active, clipName, clipDir := rp.clipboardProvider(); active && clipName == fi.Name && clipDir == rp.currentPath {
@@ -233,11 +229,11 @@ func (rp *RemotePane) populateTable(entries []domain.FileInfo) {
 				nameColor = tcell.GetColor("#00FF7F") // green for clipboard marker (CLP-01, UI-SPEC)
 			} else if rp.selected[fi.Name] {
 				nameText = "* " + nameText
-				nameColor = tcell.GetColor("#FFD700")
+				nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
 			}
 		} else if rp.selected[fi.Name] {
 			nameText = "* " + nameText
-			nameColor = tcell.GetColor("#FFD700")
+			nameColor = tcell.GetColor("#FFD700") // gold for selected (UI-SPEC)
 		}
 		nameCell := tview.NewTableCell(nameText).
 			SetTextColor(nameColor).
