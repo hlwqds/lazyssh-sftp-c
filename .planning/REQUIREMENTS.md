@@ -51,27 +51,28 @@
 
 | REQ-ID | Phase | Plan | Task | Status |
 |--------|-------|------|------|--------|
-| DEL-01 | - | - | - | Pending |
-| DEL-02 | - | - | - | Pending |
-| DEL-03 | - | - | - | Pending |
-| DEL-04 | - | - | - | Pending |
-| REN-01 | - | - | - | Pending |
-| REN-02 | - | - | - | Pending |
-| MKD-01 | - | - | - | Pending |
-| MKD-02 | - | - | - | Pending |
-| CPY-01 | - | - | - | Pending |
-| CPY-02 | - | - | - | Pending |
-| CPY-03 | - | - | - | Pending |
-| MOV-01 | - | - | - | Pending |
-| MOV-02 | - | - | - | Pending |
-| MOV-03 | - | - | - | Pending |
-| PRG-01 | - | - | - | Pending |
-| CNF-01 | - | - | - | Pending |
-| CNF-02 | - | - | - | Pending |
-| CLP-01 | - | - | - | Pending |
-| CLP-02 | - | - | - | Pending |
-| CLP-03 | - | - | - | Pending |
-| RCP-01 | - | - | - | Pending |
+| DEL-01 | Phase 6 | - | - | Pending |
+| DEL-02 | Phase 6 | - | - | Pending |
+| DEL-03 | Phase 6 | - | - | Pending |
+| DEL-04 | Phase 6 | - | - | Pending |
+| REN-01 | Phase 6 | - | - | Pending |
+| REN-02 | Phase 6 | - | - | Pending |
+| MKD-01 | Phase 6 | - | - | Pending |
+| MKD-02 | Phase 6 | - | - | Pending |
+| CPY-01 | Phase 7 | - | - | Pending |
+| CPY-02 | Phase 7 | - | - | Pending |
+| CPY-03 | Phase 7 | - | - | Pending |
+| MOV-01 | Phase 8 | - | - | Pending |
+| MOV-02 | Phase 8 | - | - | Pending |
+| MOV-03 | Phase 8 | - | - | Pending |
+| PRG-01 | Phase 8 | - | - | Pending |
+| CNF-01 | Phase 8 | - | - | Pending |
+| CNF-02 | Phase 8 | - | - | Pending |
+| CLP-01 | Phase 7 | - | - | Pending |
+| CLP-02 | Phase 7 | - | - | Pending |
+| CLP-03 | Phase 7 | - | - | Pending |
+| RCP-01 | Phase 7 | - | - | Pending |
 
 ---
 *Requirements defined: 2026-04-15 — v1.2 File Operations*
+*Traceability updated: 2026-04-15 — roadmap created*
