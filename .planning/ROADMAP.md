@@ -134,10 +134,10 @@ Plans:
   2. 新条目的别名自动生成唯一后缀（原名-copy、原名-copy-2 等），不与已有条目冲突
   3. 按 D 键后自动打开 ServerForm 编辑表单，用户可修改任意字段后保存为新条目
   4. 新条目不继承原条目的运行时元数据（ping 状态、置顶时间、SSH 连接计数等）
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 09-01: TBD
+- [ ] 09-01: D key dup handler, alias generation, metadata clearing, form wiring, hint updates
 
 ## Progress
 
