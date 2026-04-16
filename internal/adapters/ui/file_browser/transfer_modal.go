@@ -22,6 +22,7 @@ import (
 	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"go.uber.org/zap"
 )
 
 // speedSample captures a data point for sliding-window speed calculation.
@@ -71,22 +72,27 @@ const (
 // All UI updates must go through app.QueueUpdateDraw() for thread safety.
 type TransferModal struct {
 	*tview.Box
-	app *tview.Application
-	bar *ProgressBar
+	app  *tview.Application
+	log  *zap.SugaredLogger
+	bar  *ProgressBar
+	bar2 *ProgressBar // upload-phase progress bar (cross-remote two-stage)
 
 	// display state
-	fileLabel    string      // "Uploading: filename.txt"
-	infoLine     string      // "67%  2.3 MB/s"
-	etaLine      string      // "ETA: 0m 12s"
-	summaryLine  string      // "Transferred 8/10 files, 2 failed"
-	summaryColor tcell.Color // color for summary text (white for success, red for canceled)
+	fileLabel      string      // "Uploading: filename.txt"
+	infoLine       string      // "67%  2.3 MB/s"
+	etaLine        string      // "ETA: 0m 12s"
+	uploadInfoLine string      // upload-phase speed line (cross-remote)
+	uploadEtaLine  string      // upload-phase ETA line (cross-remote)
+	summaryLine    string      // "Transferred 8/10 files, 2 failed"
+	summaryColor   tcell.Color // color for summary text (white for success, red for canceled)
 
 	// mode system
 	mode            modalMode
 	cancelConfirmed bool
 
 	// speed tracking
-	speedSamples []speedSample
+	speedSamples       []speedSample // download phase
+	uploadSpeedSamples []speedSample // upload phase (cross-remote)
 
 	// modal state
 	visible   bool
@@ -98,10 +104,11 @@ type TransferModal struct {
 }
 
 // NewTransferModal creates a new TransferModal overlay component.
-func NewTransferModal(app *tview.Application) *TransferModal {
+func NewTransferModal(app *tview.Application, log *zap.SugaredLogger) *TransferModal {
 	tm := &TransferModal{
 		Box:          tview.NewBox().SetBorderPadding(2, 2, 5, 5),
 		app:          app,
+		log:          log,
 		bar:          NewProgressBar(),
 		visible:      false,
 		speedSamples: make([]speedSample, 0, maxSpeedSamples),
@@ -124,6 +131,7 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	if !tm.visible {
 		return
 	}
+	tm.log.Debugw("[TransferModal] Draw called", "mode", tm.mode)
 
 	// Set full-screen rect before drawing (Pitfall 4: SetRect before DrawForSubclass)
 	termWidth, termHeight := screen.Size()
@@ -133,8 +141,10 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	x, y, width, height := tm.GetInnerRect()
 
 	switch tm.mode {
-	case modeProgress, modeCopy, modeMove, modeCrossRemote:
+	case modeProgress, modeCopy, modeMove:
 		tm.drawProgress(screen, x, y, width, height)
+	case modeCrossRemote:
+		tm.drawCrossRemoteProgress(screen, x, y, width, height)
 	case modeCancelConfirm:
 		tm.drawCancelConfirm(screen, x, y, width, height)
 	case modeConflictDialog:
@@ -265,15 +275,20 @@ func (tm *TransferModal) ShowMove(filename string) {
 // ShowCrossRemote displays the modal in cross-remote mode for relay transfer progress (D-02).
 // sourceAlias and targetAlias are used to differentiate the two-stage labels.
 func (tm *TransferModal) ShowCrossRemote(sourceAlias, targetAlias, filename string) {
+	tm.log.Debugw("[TransferModal] ShowCrossRemote", "source", sourceAlias, "target", targetAlias, "file", filename)
 	tm.visible = true
 	tm.mode = modeCrossRemote
 	tm.cancelConfirmed = false
 	tm.SetTitle(fmt.Sprintf(" Transfer: %s ", filename))
 	tm.bar = NewProgressBar()
+	tm.bar2 = NewProgressBar()
 	tm.speedSamples = tm.speedSamples[:0]
-	tm.fileLabel = fmt.Sprintf("Downloading from %s: %s", sourceAlias, filename)
+	tm.uploadSpeedSamples = tm.uploadSpeedSamples[:0]
+	tm.fileLabel = filename
 	tm.infoLine = ""
 	tm.etaLine = ""
+	tm.uploadInfoLine = ""
+	tm.uploadEtaLine = ""
 }
 
 // ShowCancelConfirm switches the modal to cancel confirmation mode.
@@ -286,6 +301,12 @@ func (tm *TransferModal) ShowCancelConfirm() {
 func (tm *TransferModal) ResumeProgress() {
 	tm.mode = modeProgress
 	tm.cancelConfirmed = false
+}
+
+// ResumeCrossRemote returns the modal from conflict dialog back to cross-remote progress mode.
+func (tm *TransferModal) ResumeCrossRemote() {
+	tm.mode = modeCrossRemote
+	tm.conflictActionCh = nil
 }
 
 // ResetProgress resets the progress bar and speed samples for phase transitions
@@ -405,6 +426,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 	if !tm.visible {
 		return event
 	}
+	tm.log.Debugw("[TransferModal] HandleKey", "key", event.Key(), "rune", event.Rune(), "mode", tm.mode)
 
 	switch tm.mode {
 	case modeConflictDialog:
@@ -541,6 +563,99 @@ func (tm *TransferModal) Update(p domain.TransferProgress) {
 			tm.SetTitle(newTitle)
 		}
 	}
+}
+
+// UpdateUpload updates the upload-phase progress bar (bar2) for cross-remote transfers.
+// The caller is responsible for wrapping calls in app.QueueUpdateDraw().
+func (tm *TransferModal) UpdateUpload(p domain.TransferProgress) {
+	if tm.mode != modeCrossRemote {
+		return
+	}
+
+	tm.bar2.SetProgress(p.BytesDone, p.BytesTotal)
+
+	pct := float64(0)
+	if p.BytesTotal > 0 {
+		pct = float64(p.BytesDone) / float64(p.BytesTotal) * 100
+		if pct > 100 {
+			pct = 100
+		}
+	}
+
+	// Calculate upload speed using separate sliding window
+	now := time.Now()
+	tm.uploadSpeedSamples = append(tm.uploadSpeedSamples, speedSample{time: now, bytes: p.BytesDone})
+	if len(tm.uploadSpeedSamples) > maxSpeedSamples {
+		tm.uploadSpeedSamples = tm.uploadSpeedSamples[len(tm.uploadSpeedSamples)-maxSpeedSamples:]
+	}
+	speed := float64(0)
+	if len(tm.uploadSpeedSamples) >= 2 {
+		oldest := tm.uploadSpeedSamples[0]
+		latest := tm.uploadSpeedSamples[len(tm.uploadSpeedSamples)-1]
+		elapsed := latest.time.Sub(oldest.time).Seconds()
+		if elapsed > 0 {
+			speed = float64(latest.bytes-oldest.bytes) / elapsed
+		}
+	}
+
+	tm.uploadInfoLine = fmt.Sprintf("%.0f%%", pct)
+	if speed > 0 {
+		tm.uploadInfoLine += "  " + formatSpeed(speed)
+	}
+
+	if speed > 0 && p.BytesTotal > 0 {
+		remaining := float64(p.BytesTotal-p.BytesDone) / speed
+		tm.uploadEtaLine = "ETA: " + formatETA(remaining)
+	} else {
+		tm.uploadEtaLine = ""
+	}
+
+	if p.Done {
+		tm.bar2.SetColor(completedColor)
+		tm.uploadEtaLine = "Complete"
+	}
+	if p.Failed {
+		tm.uploadInfoLine = "Upload failed"
+		tm.uploadEtaLine = ""
+	}
+}
+
+// drawCrossRemoteProgress renders the two-stage progress display for cross-remote transfers.
+// Shows download bar and upload bar simultaneously.
+//
+//	Row 1: file name
+//	Row 2: download bar + percentage + speed + ETA
+//	Row 3: upload bar + percentage + speed + ETA
+func (tm *TransferModal) drawCrossRemoteProgress(screen tcell.Screen, x, y, width, _ int) {
+	// Row 1: file name
+	row1 := y + 1
+	tview.Print(screen, tm.fileLabel, x, row1, width, tview.AlignCenter, tcell.Color255)
+
+	// Row 2: download progress bar
+	row2 := y + 2
+	dlLine := tm.bar.String()
+	dlPct := ""
+	if tm.bar.total > 0 {
+		p := float64(tm.bar.current) / float64(tm.bar.total) * 100
+		if p > 100 {
+			p = 100
+		}
+		dlPct = fmt.Sprintf(" %.0f%%", p)
+	}
+	tview.Print(screen, "[Download] "+dlLine+dlPct+" "+tm.infoLine+" "+tm.etaLine, x, row2, width, tview.AlignLeft, tcell.Color248)
+
+	// Row 3: upload progress bar
+	row3 := y + 3
+	ulLine := tm.bar2.String()
+	ulPct := ""
+	if tm.bar2.total > 0 {
+		p := float64(tm.bar2.current) / float64(tm.bar2.total) * 100
+		if p > 100 {
+			p = 100
+		}
+		ulPct = fmt.Sprintf(" %.0f%%", p)
+	}
+	tview.Print(screen, "[Upload]   "+ulLine+ulPct+" "+tm.uploadInfoLine+" "+tm.uploadEtaLine, x, row3, width, tview.AlignLeft, tcell.Color248)
 }
 
 // calculateSpeed computes transfer speed using a sliding window of recent samples.

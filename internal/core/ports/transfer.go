@@ -59,4 +59,20 @@ type TransferService interface {
 	// Downloads remoteSrc directory to a temp directory, then uploads to remoteDst.
 	// Returns list of failed file paths.
 	CopyRemoteDir(ctx context.Context, remoteSrc, remoteDst string, onProgress func(domain.TransferProgress), onConflict domain.ConflictHandler) ([]string, error)
+
+	// DownloadTo downloads a file from remote to local path without any conflict checking.
+	// Pure data transfer — no dialogs, no interaction. Used by relay transfer.
+	DownloadTo(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error
+
+	// UploadFrom uploads a file from local path to remote without any conflict checking.
+	// Pure data transfer — no dialogs, no interaction. Used by relay transfer.
+	UploadFrom(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error
+
+	// DownloadDirTo downloads a directory from remote to local path without conflict checking.
+	// Pure data transfer. Used by relay transfer.
+	DownloadDirTo(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error)
+
+	// UploadDirFrom uploads a directory from local path to remote without conflict checking.
+	// Pure data transfer. Used by relay transfer.
+	UploadDirFrom(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error)
 }

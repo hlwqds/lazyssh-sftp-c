@@ -35,6 +35,9 @@ const (
 	directionDownload = "Downloading"
 )
 
+// msgDirNotEmpty is the warning shown when deleting a non-empty directory.
+const msgDirNotEmpty = "Directory not empty, all contents will be deleted"
+
 // ClipboardOp represents the clipboard operation type.
 type ClipboardOp int
 
@@ -133,7 +136,7 @@ func (fb *FileBrowser) build() {
 	})
 
 	// Create transfer modal
-	fb.transferModal = NewTransferModal(fb.app)
+	fb.transferModal = NewTransferModal(fb.app, fb.log)
 
 	// Create recent directories tracker (Phase 4: data layer, Phase 5: popup UI)
 	fb.recentDirs = NewRecentDirs(fb.log, fb.server.Host, fb.server.User)
@@ -706,7 +709,7 @@ func (fb *FileBrowser) handleDelete() {
 
 	detail := ""
 	if fi.IsDir {
-		detail = "Directory not empty, all contents will be deleted"
+		detail = msgDirNotEmpty
 	}
 
 	fb.confirmDialog.SetOnConfirm(func() {
@@ -1140,7 +1143,6 @@ func (fb *FileBrowser) handleRemoteMove(sourcePath, targetPath, targetName strin
 		fb.app.SetFocus(fb.currentPane())
 	})
 	fb.transferModal.ShowMove(fb.clipboard.FileInfo.Name)
-	fb.app.QueueUpdateDraw(func() {})
 
 	go func() {
 		// Phase 1: Copy remote source to target
@@ -1253,7 +1255,6 @@ func (fb *FileBrowser) handleRemotePaste(sourcePath, targetPath, targetName stri
 		fb.app.SetFocus(fb.currentPane())
 	})
 	fb.transferModal.ShowCopy(fb.clipboard.FileInfo.Name)
-	fb.app.QueueUpdateDraw(func() {}) // trigger initial draw
 
 	go func() {
 		var err error

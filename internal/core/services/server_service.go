@@ -153,6 +153,31 @@ func (s *serverService) SetPinned(alias string, pinned bool) error {
 	return err
 }
 
+// terminals that commonly lack terminfo on remote servers.
+var remoteIncompatibleTerms = []string{
+	"xterm-kitty",
+}
+
+// sshEnv returns the current environment with TERM remapped to xterm-256color
+// when the local terminal is known to lack terminfo on remote servers (e.g., kitty).
+func sshEnv() []string {
+	env := os.Environ()
+	term := os.Getenv("TERM")
+	for _, incompatible := range remoteIncompatibleTerms {
+		if term == incompatible {
+			for i, e := range env {
+				if strings.HasPrefix(e, "TERM=") {
+					env[i] = "TERM=xterm-256color"
+					return env
+				}
+			}
+			env = append(env, "TERM=xterm-256color")
+			return env
+		}
+	}
+	return env
+}
+
 // SSH starts an interactive SSH session to the given alias using the system's ssh client.
 func (s *serverService) SSH(alias string) error {
 	s.logger.Infow("ssh start", "alias", alias)
@@ -160,6 +185,7 @@ func (s *serverService) SSH(alias string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = sshEnv()
 	if err := cmd.Run(); err != nil {
 		s.logger.Errorw("ssh command failed", "alias", alias, "error", err)
 		return err
@@ -183,6 +209,7 @@ func (s *serverService) SSHWithArgs(alias string, extraArgs []string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = sshEnv()
 	if err := cmd.Run(); err != nil {
 		s.logger.Errorw("ssh (with args) failed", "alias", alias, "error", err)
 		return err

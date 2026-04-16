@@ -121,6 +121,12 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 	}
 	defer func() { _ = remoteFile.Close() }()
 
+	// Get remote file size for progress tracking
+	var total int64
+	if remoteStat, statErr := ts.sftp.Stat(remotePath); statErr == nil {
+		total = remoteStat.Size()
+	}
+
 	// Create parent directory if needed
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o750); err != nil {
 		return fmt.Errorf("mkdir local %s: %w", filepath.Dir(localPath), err)
@@ -131,7 +137,7 @@ func (ts *transferService) DownloadFile(ctx context.Context, remotePath, localPa
 		return fmt.Errorf("create local %s: %w", localPath, err)
 	}
 
-	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, 0, onProgress)
+	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, total, onProgress)
 	_ = localFile.Close()
 
 	// D-04: cancel cleanup — delete partial local file
@@ -521,6 +527,105 @@ func (ts *transferService) CopyRemoteDir(
 	copy(allFailed, dlFailed)
 	copy(allFailed[len(dlFailed):], ulFailed)
 	return allFailed, nil
+}
+
+// DownloadTo downloads a file from remote to local without conflict checking.
+// Pure data transfer — no dialogs, no interaction.
+func (ts *transferService) DownloadTo(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) error {
+	ts.log.Debugw("[Transfer] DownloadTo start", "remote", remotePath, "local", localPath)
+
+	remoteFile, err := ts.sftp.OpenRemoteFile(remotePath)
+	if err != nil {
+		return fmt.Errorf("open remote %s: %w", remotePath, err)
+	}
+	defer func() { _ = remoteFile.Close() }()
+
+	// Get remote file size for progress
+	var total int64
+	if remoteStat, statErr := ts.sftp.Stat(remotePath); statErr == nil {
+		total = remoteStat.Size()
+	}
+	ts.log.Debugw("[Transfer] DownloadTo stat", "remote", remotePath, "size", total)
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o750); err != nil {
+		return fmt.Errorf("mkdir local %s: %w", filepath.Dir(localPath), err)
+	}
+
+	localFile, err := os.Create(localPath) //nolint:gosec // G304: path from temp file
+	if err != nil {
+		return fmt.Errorf("create local %s: %w", localPath, err)
+	}
+
+	err = ts.copyWithProgress(ctx, remoteFile, localFile, remotePath, localPath, total, onProgress)
+	_ = localFile.Close()
+
+	if errors.Is(err, context.Canceled) {
+		ts.log.Infow("[Transfer] DownloadTo canceled, cleaning up", "path", localPath)
+		if removeErr := os.Remove(localPath); removeErr != nil {
+			ts.log.Warnw("[Transfer] failed to cleanup partial file", "path", localPath, "error", removeErr)
+		}
+		return context.Canceled
+	}
+	if err != nil {
+		ts.log.Errorw("[Transfer] DownloadTo failed", "remote", remotePath, "error", err)
+		return err
+	}
+
+	setFilePermissions(localPath, 0o644, ts.log)
+	ts.log.Debugw("[Transfer] DownloadTo done", "remote", remotePath, "local", localPath)
+	return nil
+}
+
+// UploadFrom uploads a file from local to remote without conflict checking.
+// Pure data transfer — no dialogs, no interaction.
+func (ts *transferService) UploadFrom(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) error {
+	ts.log.Debugw("[Transfer] UploadFrom start", "local", localPath, "remote", remotePath)
+
+	localFile, err := os.Open(localPath) //nolint:gosec // G304: path from temp file
+	if err != nil {
+		return fmt.Errorf("open local %s: %w", localPath, err)
+	}
+	defer func() { _ = localFile.Close() }()
+
+	stat, err := localFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat local %s: %w", localPath, err)
+	}
+	total := stat.Size()
+	ts.log.Debugw("[Transfer] UploadFrom stat", "local", localPath, "size", total)
+
+	remoteFile, err := ts.sftp.CreateRemoteFile(remotePath)
+	if err != nil {
+		return fmt.Errorf("create remote %s: %w", remotePath, err)
+	}
+
+	err = ts.copyWithProgress(ctx, localFile, remoteFile, localPath, localPath, total, onProgress)
+	_ = remoteFile.Close()
+
+	if errors.Is(err, context.Canceled) {
+		ts.log.Infow("[Transfer] UploadFrom canceled, cleaning up", "path", remotePath)
+		if removeErr := ts.sftp.Remove(remotePath); removeErr != nil {
+			ts.log.Warnw("[Transfer] failed to cleanup partial remote", "path", remotePath, "error", removeErr)
+		}
+		return context.Canceled
+	}
+	if err != nil {
+		ts.log.Errorw("[Transfer] UploadFrom failed", "local", localPath, "error", err)
+		return err
+	}
+
+	ts.log.Debugw("[Transfer] UploadFrom done", "local", localPath, "remote", remotePath)
+	return nil
+}
+
+// DownloadDirTo downloads a directory from remote to local without conflict checking.
+func (ts *transferService) DownloadDirTo(ctx context.Context, remotePath, localPath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+	return ts.DownloadDir(ctx, remotePath, localPath, onProgress, nil)
+}
+
+// UploadDirFrom uploads a directory from local to remote without conflict checking.
+func (ts *transferService) UploadDirFrom(ctx context.Context, localPath, remotePath string, onProgress func(domain.TransferProgress)) ([]string, error) {
+	return ts.UploadDir(ctx, localPath, remotePath, onProgress, nil)
 }
 
 // copyWithProgress copies data from src to dst using a 32KB buffer,

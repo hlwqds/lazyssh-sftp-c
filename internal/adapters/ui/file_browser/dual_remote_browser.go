@@ -44,25 +44,28 @@ import (
 //   - D-11: Esc closes browser, cleans up AfterDrawFunc, closes both SFTP connections
 type DualRemoteFileBrowser struct {
 	*tview.Flex
-	app           *tview.Application
-	log           *zap.SugaredLogger
-	sourcePane    *RemotePane       // left: source server
-	targetPane    *RemotePane       // right: target server
-	sourceSFTP    ports.SFTPService // independent SFTP instance for source
-	targetSFTP    ports.SFTPService // independent SFTP instance for target
-	statusBar     *tview.TextView
-	headerBar     *tview.TextView // "Source: alias (host) | Target: alias (host)"
-	confirmDialog  *ConfirmDialog                     // own instance (Pitfall 3)
-	inputDialog    *InputDialog                        // own instance (Pitfall 3)
-	transferModal  *TransferModal                      // cross-remote transfer progress overlay
-	relaySvc       ports.RelayTransferService           // relay transfer between two SFTP connections
-	clipboard      Clipboard                            // cross-remote clipboard state (SourcePane: 0=source, 1=target)
-	transferring   bool                                 // true during active transfer (guards F5/c/p)
-	transferCancel context.CancelFunc                   // cancel function for active transfer
-	activePane     int                                  // 0 = source, 1 = target
-	sourceServer  domain.Server
-	targetServer  domain.Server
-	onClose       func()
+	app            *tview.Application
+	log            *zap.SugaredLogger
+	sourcePane     *RemotePane       // left: source server
+	targetPane     *RemotePane       // right: target server
+	sourceSFTP     ports.SFTPService // independent SFTP instance for source
+	targetSFTP     ports.SFTPService // independent SFTP instance for target
+	statusBar      *tview.TextView
+	headerBar      *tview.TextView            // "Source: alias (host) | Target: alias (host)"
+	confirmDialog  *ConfirmDialog             // own instance (Pitfall 3)
+	inputDialog    *InputDialog               // own instance (Pitfall 3)
+	transferModal  *TransferModal             // cross-remote transfer progress overlay
+	relaySvc       ports.RelayTransferService // relay transfer between two SFTP connections
+	clipboard      Clipboard                  // cross-remote clipboard state (SourcePane: 0=source, 1=target)
+	sourceRecent   *RecentDirs                // recent dirs for source pane
+	targetRecent   *RecentDirs                // recent dirs for target pane
+	recentPane     int                        // which pane's RecentDirs is visible (0=source, 1=target)
+	transferring   bool                       // true during active transfer (guards F5/c/p)
+	transferCancel context.CancelFunc         // cancel function for active transfer
+	activePane     int                        // 0 = source, 1 = target
+	sourceServer   domain.Server
+	targetServer   domain.Server
+	onClose        func()
 }
 
 // NewDualRemoteFileBrowser creates a new DualRemoteFileBrowser with two independent
@@ -74,12 +77,12 @@ func NewDualRemoteFileBrowser(
 	onClose func(),
 ) *DualRemoteFileBrowser {
 	drb := &DualRemoteFileBrowser{
-		Flex:          tview.NewFlex(),
-		app:           app,
-		log:           log,
-		sourceServer:  source,
-		targetServer:  target,
-		onClose:       onClose,
+		Flex:         tview.NewFlex(),
+		app:          app,
+		log:          log,
+		sourceServer: source,
+		targetServer: target,
+		onClose:      onClose,
 	}
 
 	// Create two independent SFTP client instances (D-02: NOT tui.sftpService)
@@ -93,8 +96,22 @@ func NewDualRemoteFileBrowser(
 	// Create overlay dialogs (D-05: own instances)
 	drb.confirmDialog = NewConfirmDialog(app)
 	drb.inputDialog = NewInputDialog(app)
-	drb.transferModal = NewTransferModal(app)
+	drb.transferModal = NewTransferModal(app, log)
 	drb.relaySvc = transfer.NewRelay(log, drb.sourceSFTP, drb.targetSFTP)
+
+	// Create RecentDirs for each pane
+	drb.sourceRecent = NewRecentDirs(log, source.Host, source.User)
+	drb.targetRecent = NewRecentDirs(log, target.Host, target.User)
+	drb.sourceRecent.SetOnSelect(func(path string) {
+		drb.sourceRecent.Hide()
+		drb.sourcePane.NavigateTo(path)
+		drb.sourceRecent.Record(path)
+	})
+	drb.targetRecent.SetOnSelect(func(path string) {
+		drb.targetRecent.Hide()
+		drb.targetPane.NavigateTo(path)
+		drb.targetRecent.Record(path)
+	})
 
 	// Clipboard provider for [C]/[M] prefix rendering in both panes
 	drb.sourcePane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
@@ -102,6 +119,30 @@ func NewDualRemoteFileBrowser(
 	})
 	drb.targetPane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
 		return drb.clipboard.Active, drb.clipboard.FileInfo.Name, drb.clipboard.SourceDir, drb.clipboard.Operation
+	})
+
+	// Enter on file: initiate F5-style transfer to opposite pane
+	drb.sourcePane.OnFileAction(func(fi domain.FileInfo) {
+		if drb.transferring {
+			return
+		}
+		drb.activePane = 0
+		drb.executeF5Transfer(fi, 1)
+	})
+	drb.targetPane.OnFileAction(func(fi domain.FileInfo) {
+		if drb.transferring {
+			return
+		}
+		drb.activePane = 1
+		drb.executeF5Transfer(fi, 0)
+	})
+
+	// Record path changes to RecentDirs
+	drb.sourcePane.OnPathChange(func(path string) {
+		drb.sourceRecent.Record(path)
+	})
+	drb.targetPane.OnPathChange(func(path string) {
+		drb.targetRecent.Record(path)
 	})
 
 	drb.build()
@@ -125,7 +166,7 @@ func (drb *DualRemoteFileBrowser) build() {
 	content := tview.NewFlex().SetDirection(tview.FlexColumn)
 	content.SetBackgroundColor(tcell.ColorDefault)
 	content.
-		AddItem(drb.sourcePane, 0, 1, true).  // 50% width, initially focused
+		AddItem(drb.sourcePane, 0, 1, true). // 50% width, initially focused
 		AddItem(drb.targetPane, 0, 1, false) // 50% width
 
 	// Create status bar
@@ -164,6 +205,14 @@ func (drb *DualRemoteFileBrowser) build() {
 			screen.Sync()
 			return
 		}
+		if drb.sourceRecent != nil && drb.sourceRecent.IsVisible() {
+			screen.Sync()
+			return
+		}
+		if drb.targetRecent != nil && drb.targetRecent.IsVisible() {
+			screen.Sync()
+			return
+		}
 		_, _, width, height := drb.GetRect()
 		if height >= 1 && drb.statusBar != nil {
 			sy := height - 1
@@ -184,7 +233,9 @@ func (drb *DualRemoteFileBrowser) build() {
 
 	// Start parallel SFTP connections (D-07, D-08)
 	go func() {
+		drb.log.Debugw("[DRB] connecting source SFTP", "alias", drb.sourceServer.Alias, "host", drb.sourceServer.Host)
 		err := drb.sourceSFTP.Connect(drb.sourceServer)
+		drb.log.Debugw("[DRB] source SFTP connected", "alias", drb.sourceServer.Alias, "err", err)
 		drb.app.QueueUpdateDraw(func() {
 			if err != nil {
 				drb.sourcePane.ShowError(err.Error())
@@ -195,7 +246,9 @@ func (drb *DualRemoteFileBrowser) build() {
 		})
 	}()
 	go func() {
+		drb.log.Debugw("[DRB] connecting target SFTP", "alias", drb.targetServer.Alias, "host", drb.targetServer.Host)
 		err := drb.targetSFTP.Connect(drb.targetServer)
+		drb.log.Debugw("[DRB] target SFTP connected", "alias", drb.targetServer.Alias, "err", err)
 		drb.app.QueueUpdateDraw(func() {
 			if err != nil {
 				drb.targetPane.ShowError(err.Error())
@@ -219,6 +272,12 @@ func (drb *DualRemoteFileBrowser) Draw(screen tcell.Screen) {
 	}
 	if drb.transferModal != nil && drb.transferModal.IsVisible() {
 		drb.transferModal.Draw(screen)
+	}
+	if drb.sourceRecent != nil && drb.sourceRecent.IsVisible() {
+		drb.sourceRecent.Draw(screen)
+	}
+	if drb.targetRecent != nil && drb.targetRecent.IsVisible() {
+		drb.targetRecent.Draw(screen)
 	}
 }
 
@@ -434,6 +493,14 @@ func (drb *DualRemoteFileBrowser) sftpForIdx(idx int) ports.SFTPService {
 	return drb.targetSFTP
 }
 
+// paneRecent returns the RecentDirs for the given index (0=source, 1=target).
+func (drb *DualRemoteFileBrowser) paneRecent() *RecentDirs {
+	if drb.recentPane == 0 {
+		return drb.sourceRecent
+	}
+	return drb.targetRecent
+}
+
 // aliasForIdx returns the server alias for the given index (0=source, 1=target).
 func (drb *DualRemoteFileBrowser) aliasForIdx(idx int) string {
 	if idx == 0 {
@@ -441,4 +508,3 @@ func (drb *DualRemoteFileBrowser) aliasForIdx(idx int) string {
 	}
 	return drb.targetServer.Alias
 }
-

@@ -95,25 +95,35 @@ func (rp *RemotePane) build() {
 
 	// Enter key: navigate into directory (only when connected)
 	rp.SetSelectedFunc(func(row, _ int) {
+		rp.log.Debugw("[RemotePane] SetSelectedFunc called", "row", row, "connected", rp.connected, "server", rp.server.Alias)
 		if !rp.connected {
+			rp.log.Debugw("[RemotePane] not connected, ignoring Enter")
 			return
 		}
 		cell := rp.GetCell(row, 0)
 		if cell == nil {
+			rp.log.Debugw("[RemotePane] cell is nil for row", "row", row)
 			return
 		}
 		ref := cell.GetReference()
 		if ref == nil {
+			rp.log.Debugw("[RemotePane] ref is nil for row", "row", row)
 			return
 		}
 		fi, ok := ref.(domain.FileInfo)
-		if !ok || !fi.IsDir {
-			if rp.onFileAction != nil {
-				rp.onFileAction(fi)
-			}
+		if !ok {
+			rp.log.Debugw("[RemotePane] ref is not FileInfo", "row", row)
 			return
 		}
-		rp.NavigateInto(fi.Name)
+		if fi.IsDir {
+			rp.log.Debugw("[RemotePane] navigating into directory", "name", fi.Name)
+			rp.NavigateInto(fi.Name)
+			return
+		}
+		rp.log.Debugw("[RemotePane] file selected, calling onFileAction", "name", fi.Name, "hasCallback", rp.onFileAction != nil)
+		if rp.onFileAction != nil {
+			rp.onFileAction(fi)
+		}
 	})
 
 	// Initial state: show "Connecting..." placeholder

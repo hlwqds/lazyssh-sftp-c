@@ -18,7 +18,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/Adembc/lazyssh/internal/adapters/data/transfer"
 	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/Adembc/lazyssh/internal/core/ports"
 	"github.com/gdamore/tcell/v2"
@@ -27,13 +29,23 @@ import (
 // handleGlobalKeys handles global keyboard events for the DualRemoteFileBrowser.
 // Event propagation chain:
 // 1. Overlay visibility check -> InputDialog/ConfirmDialog intercept when visible
-// 2. DualRemoteFileBrowser.SetInputCapture -> handles Tab, Esc, d, R, m, s, S
+// 2. DualRemoteFileBrowser.SetInputCapture -> handles Tab, Esc, d, r, R, m, s, S
 // 3. FocusedPane.SetInputCapture -> handles h, Backspace, Space, . (from RemotePane)
 // 4. Table.InputHandler -> handles j/k/arrow/Enter/PgUp/PgDn (built-in)
+//
+//nolint:gocyclo // keyboard dispatch: complexity proportional to handled keys
 func (drb *DualRemoteFileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell.EventKey {
 	// TransferModal has highest overlay priority (full-screen overlay)
 	if drb.transferModal != nil && drb.transferModal.IsVisible() {
+		drb.log.Debugw("[DRB-KEY] transferModal visible, delegating", "key", event.Key(), "rune", event.Rune())
 		return drb.transferModal.HandleKey(event)
+	}
+	// RecentDirs intercepts all keys when visible
+	if drb.recentPane == 0 && drb.sourceRecent != nil && drb.sourceRecent.IsVisible() {
+		return drb.sourceRecent.HandleKey(event)
+	}
+	if drb.recentPane == 1 && drb.targetRecent != nil && drb.targetRecent.IsVisible() {
+		return drb.targetRecent.HandleKey(event)
 	}
 	// Overlay key interception: check BEFORE any other key handling (same as FileBrowser)
 	// InputDialog has highest priority (text input must consume all keys)
@@ -83,6 +95,17 @@ func (drb *DualRemoteFileBrowser) handleGlobalKeys(event *tcell.EventKey) *tcell
 		return nil
 	case 'd':
 		drb.handleDelete()
+		return nil
+	case 'r':
+		pane := drb.currentPane()
+		if !pane.IsConnected() {
+			drb.showStatusError("Not connected to " + drb.activePanelLabel())
+			return nil
+		}
+		drb.recentPane = drb.activePane
+		recent := drb.paneRecent()
+		recent.SetCurrentPath(drb.getCurrentPanePath())
+		recent.Show()
 		return nil
 	case 'R':
 		drb.handleRename()
@@ -180,7 +203,7 @@ func (drb *DualRemoteFileBrowser) handleDelete() {
 
 	detail := ""
 	if fi.IsDir {
-		detail = "Directory not empty, all contents will be deleted"
+		detail = msgDirNotEmpty
 	}
 
 	drb.confirmDialog.SetOnConfirm(func() {
@@ -479,6 +502,11 @@ func (drb *DualRemoteFileBrowser) handleCrossRemotePaste() {
 		return
 	}
 
+	// Guard: block during active transfer
+	if drb.transferring {
+		return
+	}
+
 	// Determine source and target panes
 	srcPaneIdx := drb.clipboard.SourcePane // 0=source, 1=target
 	dstPaneIdx := 1 - srcPaneIdx           // opposite pane
@@ -526,50 +554,82 @@ func (drb *DualRemoteFileBrowser) handleCrossRemotePaste() {
 	})
 
 	drb.transferModal.ShowCrossRemote(sourceAlias, targetAlias, targetName)
-	drb.app.QueueUpdateDraw(func() {})
 
 	go func() {
 		defer cancel()
-
-		// Build two-stage progress callback
-		var dlDone bool
-		combinedProgress := func(p domain.TransferProgress) {
-			if p.Done && !dlDone {
-				dlDone = true
+		defer func() {
+			if r := recover(); r != nil {
 				drb.app.QueueUpdateDraw(func() {
-					drb.transferModal.ResetProgress()
-					drb.transferModal.fileLabel = fmt.Sprintf("Uploading to %s: %s", targetAlias, targetName)
+					drb.transferring = false
+					drb.transferModal.Hide()
+					drb.showStatusError(fmt.Sprintf("Transfer panic: %v", r))
 				})
-				return
 			}
-			label := fmt.Sprintf("Downloading from %s: %s", sourceAlias, targetName)
+		}()
+
+		// Step 1: Check conflict on target for single files
+		if !drb.clipboard.FileInfo.IsDir {
+			if dstInfo, statErr := dstSFTP.Stat(dstPath); statErr == nil {
+				if dstInfo.IsDir() {
+					drb.app.QueueUpdateDraw(func() {
+						drb.transferring = false
+						drb.transferModal.Hide()
+						drb.showStatusError("Target is a directory with the same name")
+					})
+					return
+				}
+				onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, dstPane.GetCurrentPath())
+				action, newPath := onConflict(targetName)
+				switch action {
+				case domain.ConflictSkip:
+					drb.app.QueueUpdateDraw(func() {
+						drb.transferring = false
+						drb.transferModal.Hide()
+					})
+					return
+				case domain.ConflictRename:
+					dstPath = newPath
+				case domain.ConflictOverwrite:
+					// continue with download + upload
+				}
+				// Restore mode: conflict dialog changed it to modeConflictDialog
+				drb.app.QueueUpdateDraw(func() {
+					drb.transferModal.ResumeCrossRemote()
+				})
+			}
+		}
+
+		// Step 2: Download progress callback → updates bar (download)
+		dlProgress := func(p domain.TransferProgress) {
 			drb.app.QueueUpdateDraw(func() {
-				drb.transferModal.fileLabel = label
 				drb.transferModal.Update(p)
 			})
 		}
-
-		// Build conflict handler for target server
-		onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, dstPane.GetCurrentPath())
-
-		// Execute relay transfer
-		var relayErr error
-		if drb.clipboard.FileInfo.IsDir {
-			_, relayErr = drb.relaySvc.RelayDir(ctx, srcPath, dstPath, combinedProgress, onConflict)
-		} else {
-			relayErr = drb.relaySvc.RelayFile(ctx, srcPath, dstPath, combinedProgress, onConflict)
+		// Step 3: Upload progress callback → updates bar2 (upload)
+		ulProgress := func(p domain.TransferProgress) {
+			drb.app.QueueUpdateDraw(func() {
+				drb.transferModal.UpdateUpload(p)
+			})
 		}
 
-		if relayErr != nil {
+		var transferErr error
+		if drb.clipboard.FileInfo.IsDir {
+			onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, dstPane.GetCurrentPath())
+			transferErr = drb.transferDir(ctx, srcSFTP, dstSFTP, srcPath, dstPath, dlProgress, ulProgress, onConflict)
+		} else {
+			transferErr = drb.transferFile(ctx, srcSFTP, dstSFTP, srcPath, dstPath, dlProgress, ulProgress)
+		}
+
+		if transferErr != nil {
 			drb.app.QueueUpdateDraw(func() {
-				drb.showStatusError(fmt.Sprintf("Transfer failed: %s", trimError(relayErr.Error(), 50)))
+				drb.showStatusError(fmt.Sprintf("Transfer failed: %s", trimError(transferErr.Error(), 50)))
 				drb.transferring = false
 				drb.transferModal.Hide()
 			})
-			return // D-07: do NOT clear clipboard on failure
+			return // do NOT clear clipboard on failure
 		}
 
-		// Move operation: delete source file after successful relay (D-08)
+		// Move operation: delete source file after successful transfer (D-08)
 		if isMove {
 			var delErr error
 			if drb.clipboard.FileInfo.IsDir {
@@ -594,7 +654,7 @@ func (drb *DualRemoteFileBrowser) handleCrossRemotePaste() {
 					drb.transferring = false
 					drb.transferModal.Hide()
 				})
-				return // D-07: do NOT clear clipboard on failure
+				return // do NOT clear clipboard on failure
 			}
 		}
 
@@ -658,19 +718,56 @@ func (drb *DualRemoteFileBrowser) handleF5Transfer() {
 	drb.executeF5Transfer(fi, dstPaneIdx)
 }
 
-// executeF5Transfer performs the actual F5 relay transfer in a goroutine.
+// executeF5Transfer performs the actual F5 relay transfer.
+// For single files: pre-checks conflict on target, then download→temp→upload with dual progress bars.
+// For directories: transfers directly (conflicts handled per-file during upload).
 func (drb *DualRemoteFileBrowser) executeF5Transfer(fi domain.FileInfo, dstPaneIdx int) {
+	drb.log.Debugw("[DRB-F5] executeF5Transfer called",
+		"fileName", fi.Name, "isDir", fi.IsDir, "size", fi.Size,
+		"activePane", drb.activePane, "dstPaneIdx", dstPaneIdx,
+		"transferring", drb.transferring,
+	)
+
+	// Guard: block during active transfer
+	if drb.transferring {
+		drb.log.Debugw("[DRB-F5] blocked: transfer already in progress")
+		return
+	}
+
+	// Guard: both panes must be connected before starting transfer
+	srcPane := drb.currentPane()
+	dstPane := drb.paneForIdx(dstPaneIdx)
+	if !srcPane.IsConnected() {
+		drb.showStatusError("Source not connected: " + drb.aliasForIdx(drb.activePane))
+		return
+	}
+	if !dstPane.IsConnected() {
+		drb.showStatusError("Target not connected: " + drb.aliasForIdx(dstPaneIdx))
+		return
+	}
+
 	srcPaneIdx := drb.activePane
+	srcSFTP := drb.sftpForIdx(srcPaneIdx)
 	dstSFTP := drb.sftpForIdx(dstPaneIdx)
 
 	srcPath := joinPath(drb.getCurrentPanePath(), fi.Name)
-	dstPath := joinPath(drb.paneForIdx(dstPaneIdx).GetCurrentPath(), fi.Name)
+	dstPath := joinPath(dstPane.GetCurrentPath(), fi.Name)
 	sourceAlias := drb.aliasForIdx(srcPaneIdx)
 	targetAlias := drb.aliasForIdx(dstPaneIdx)
 
 	drb.transferring = true
 	ctx, cancel := context.WithCancel(context.Background())
 	drb.transferCancel = cancel
+
+	defer func() {
+		if r := recover(); r != nil {
+			drb.app.QueueUpdateDraw(func() {
+				drb.transferring = false
+				drb.transferModal.Hide()
+				drb.showStatusError(fmt.Sprintf("Transfer panic: %v", r))
+			})
+		}
+	}()
 
 	drb.transferModal.SetDismissCallback(func() {
 		if drb.transferModal.IsCanceled() {
@@ -685,35 +782,70 @@ func (drb *DualRemoteFileBrowser) executeF5Transfer(fi domain.FileInfo, dstPaneI
 	})
 
 	drb.transferModal.ShowCrossRemote(sourceAlias, targetAlias, fi.Name)
-	drb.app.QueueUpdateDraw(func() {})
 
 	go func() {
 		defer cancel()
-
-		var dlDone bool
-		combinedProgress := func(p domain.TransferProgress) {
-			if p.Done && !dlDone {
-				dlDone = true
+		defer func() {
+			if r := recover(); r != nil {
 				drb.app.QueueUpdateDraw(func() {
-					drb.transferModal.ResetProgress()
-					drb.transferModal.fileLabel = fmt.Sprintf("Uploading to %s: %s", targetAlias, fi.Name)
+					drb.transferring = false
+					drb.transferModal.Hide()
+					drb.showStatusError(fmt.Sprintf("Transfer panic: %v", r))
 				})
-				return
 			}
-			label := fmt.Sprintf("Downloading from %s: %s", sourceAlias, fi.Name)
+		}()
+
+		// Step 1: Check conflict on target for single files
+		if !fi.IsDir {
+			if dstInfo, statErr := dstSFTP.Stat(dstPath); statErr == nil {
+				if dstInfo.IsDir() {
+					drb.app.QueueUpdateDraw(func() {
+						drb.transferring = false
+						drb.transferModal.Hide()
+						drb.showStatusError("Target is a directory with the same name")
+					})
+					return
+				}
+				onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, dstPane.GetCurrentPath())
+				action, newPath := onConflict(fi.Name)
+				switch action {
+				case domain.ConflictSkip:
+					drb.app.QueueUpdateDraw(func() {
+						drb.transferring = false
+						drb.transferModal.Hide()
+					})
+					return
+				case domain.ConflictRename:
+					dstPath = newPath
+				case domain.ConflictOverwrite:
+					// continue with download + upload
+				}
+				// Restore mode: conflict dialog changed it to modeConflictDialog
+				drb.app.QueueUpdateDraw(func() {
+					drb.transferModal.ResumeCrossRemote()
+				})
+			}
+		}
+
+		// Step 2: Download progress callback → updates bar (download)
+		dlProgress := func(p domain.TransferProgress) {
 			drb.app.QueueUpdateDraw(func() {
-				drb.transferModal.fileLabel = label
 				drb.transferModal.Update(p)
 			})
 		}
-
-		onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, drb.paneForIdx(dstPaneIdx).GetCurrentPath())
+		// Step 3: Upload progress callback → updates bar2 (upload)
+		ulProgress := func(p domain.TransferProgress) {
+			drb.app.QueueUpdateDraw(func() {
+				drb.transferModal.UpdateUpload(p)
+			})
+		}
 
 		var err error
 		if fi.IsDir {
-			_, err = drb.relaySvc.RelayDir(ctx, srcPath, dstPath, combinedProgress, onConflict)
+			onConflict := drb.buildCrossConflictHandler(ctx, dstSFTP, dstPane.GetCurrentPath())
+			err = drb.transferDir(ctx, srcSFTP, dstSFTP, srcPath, dstPath, dlProgress, ulProgress, onConflict)
 		} else {
-			err = drb.relaySvc.RelayFile(ctx, srcPath, dstPath, combinedProgress, onConflict)
+			err = drb.transferFile(ctx, srcSFTP, dstSFTP, srcPath, dstPath, dlProgress, ulProgress)
 		}
 
 		drb.app.QueueUpdateDraw(func() {
@@ -730,4 +862,87 @@ func (drb *DualRemoteFileBrowser) executeF5Transfer(fi domain.FileInfo, dstPaneI
 			drb.app.SetFocus(drb.currentPane())
 		})
 	}()
+}
+
+// transferFile transfers a single file between two remote servers via local temp.
+// Uses DownloadTo/UploadFrom (pure data transfer, no conflict check, no interaction).
+// Caller handles conflict checking before calling this.
+func (drb *DualRemoteFileBrowser) transferFile(
+	ctx context.Context,
+	srcSFTP, dstSFTP ports.SFTPService,
+	srcPath, dstPath string,
+	dlProgress, ulProgress func(domain.TransferProgress),
+) error {
+	drb.log.Debugw("[RELAY] transferFile start", "src", srcPath, "dst", dstPath)
+
+	// Create temp file for intermediate storage
+	tmpFile, err := os.CreateTemp("", "lazyssh-relay-*")
+	if err != nil {
+		return fmt.Errorf("create relay temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	_ = tmpFile.Close()
+	//nolint:errcheck // best-effort cleanup in defer, failure is non-critical
+	defer os.Remove(tmpPath)
+	drb.log.Debugw("[RELAY] temp file created", "tmpPath", tmpPath)
+
+	// Phase 1: Download from source SFTP to temp (pure transfer, no conflict check)
+	dlSvc := transfer.New(drb.log, srcSFTP)
+	if err := dlSvc.DownloadTo(ctx, srcPath, tmpPath, dlProgress); err != nil {
+		drb.log.Errorw("[RELAY] download failed", "src", srcPath, "error", err)
+		return fmt.Errorf("download from source: %w", err)
+	}
+	drb.log.Debugw("[RELAY] download done", "src", srcPath, "tmp", tmpPath)
+
+	// Phase 2: Upload from temp to target SFTP (pure transfer, no conflict check)
+	ulSvc := transfer.New(drb.log, dstSFTP)
+	if err := ulSvc.UploadFrom(ctx, tmpPath, dstPath, ulProgress); err != nil {
+		drb.log.Errorw("[RELAY] upload failed", "dst", dstPath, "error", err)
+		return fmt.Errorf("upload to target: %w", err)
+	}
+	drb.log.Debugw("[RELAY] transferFile done", "src", srcPath, "dst", dstPath)
+	return nil
+}
+
+// transferDir transfers a directory between two remote servers via local temp.
+// Download uses DownloadDirTo (no conflict check), upload uses UploadDir (with onConflict for per-file).
+func (drb *DualRemoteFileBrowser) transferDir(
+	ctx context.Context,
+	srcSFTP, dstSFTP ports.SFTPService,
+	srcPath, dstPath string,
+	dlProgress, ulProgress func(domain.TransferProgress),
+	onConflict domain.ConflictHandler,
+) error {
+	drb.log.Debugw("[RELAY] transferDir start", "src", srcPath, "dst", dstPath)
+
+	// Create temp directory for intermediate storage
+	tmpDir, err := os.MkdirTemp("", "lazyssh-relaydir-*")
+	if err != nil {
+		return fmt.Errorf("create relay temp dir: %w", err)
+	}
+	//nolint:errcheck // best-effort cleanup in defer, failure is non-critical
+	defer os.RemoveAll(tmpDir)
+
+	srcBase := filepath.Base(srcPath)
+	tmpBase := tmpDir + "/" + srcBase
+	drb.log.Debugw("[RELAY] temp dir created", "tmpDir", tmpDir, "tmpBase", tmpBase)
+
+	// Phase 1: Download directory (pure transfer, no conflict check)
+	dlSvc := transfer.New(drb.log, srcSFTP)
+	_, dlErr := dlSvc.DownloadDirTo(ctx, srcPath, tmpBase, dlProgress)
+	if dlErr != nil {
+		drb.log.Errorw("[RELAY] download dir failed", "src", srcPath, "error", dlErr)
+		return fmt.Errorf("download dir from source: %w", dlErr)
+	}
+	drb.log.Debugw("[RELAY] download dir done", "src", srcPath)
+
+	// Phase 2: Upload directory (with per-file conflict check for directories)
+	ulSvc := transfer.New(drb.log, dstSFTP)
+	_, ulErr := ulSvc.UploadDir(ctx, tmpBase, dstPath, ulProgress, onConflict)
+	if ulErr != nil {
+		drb.log.Errorw("[RELAY] upload dir failed", "dst", dstPath, "error", ulErr)
+		return fmt.Errorf("upload dir to target: %w", ulErr)
+	}
+	drb.log.Debugw("[RELAY] transferDir done", "src", srcPath, "dst", dstPath)
+	return nil
 }

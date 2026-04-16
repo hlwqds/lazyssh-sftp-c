@@ -74,8 +74,9 @@ func (c *SFTPClient) Connect(server domain.Server) error {
 	if err != nil {
 		return fmt.Errorf("create stdin pipe: %w", err)
 	}
-	// SSH errors go to terminal stderr for debugging
-	cmd.Stderr = os.Stderr
+	// Discard SSH stderr to prevent TUI corruption when multiple SFTP connections are active.
+	// SSH debug output is already available via zap logger.
+	cmd.Stderr = io.Discard
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ssh process: %w", err)
