@@ -15,10 +15,12 @@
 package file_browser
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/Adembc/lazyssh/internal/adapters/data/sftp_client"
+	"github.com/Adembc/lazyssh/internal/adapters/data/transfer"
 	"github.com/Adembc/lazyssh/internal/core/domain"
 	"github.com/Adembc/lazyssh/internal/core/ports"
 	"github.com/gdamore/tcell/v2"
@@ -50,9 +52,14 @@ type DualRemoteFileBrowser struct {
 	targetSFTP    ports.SFTPService // independent SFTP instance for target
 	statusBar     *tview.TextView
 	headerBar     *tview.TextView // "Source: alias (host) | Target: alias (host)"
-	confirmDialog *ConfirmDialog  // own instance (Pitfall 3)
-	inputDialog   *InputDialog    // own instance (Pitfall 3)
-	activePane    int             // 0 = source, 1 = target
+	confirmDialog  *ConfirmDialog                     // own instance (Pitfall 3)
+	inputDialog    *InputDialog                        // own instance (Pitfall 3)
+	transferModal  *TransferModal                      // cross-remote transfer progress overlay
+	relaySvc       ports.RelayTransferService           // relay transfer between two SFTP connections
+	clipboard      Clipboard                            // cross-remote clipboard state (SourcePane: 0=source, 1=target)
+	transferring   bool                                 // true during active transfer (guards F5/c/p)
+	transferCancel context.CancelFunc                   // cancel function for active transfer
+	activePane     int                                  // 0 = source, 1 = target
 	sourceServer  domain.Server
 	targetServer  domain.Server
 	onClose       func()
@@ -86,6 +93,16 @@ func NewDualRemoteFileBrowser(
 	// Create overlay dialogs (D-05: own instances)
 	drb.confirmDialog = NewConfirmDialog(app)
 	drb.inputDialog = NewInputDialog(app)
+	drb.transferModal = NewTransferModal(app)
+	drb.relaySvc = transfer.NewRelay(log, drb.sourceSFTP, drb.targetSFTP)
+
+	// Clipboard provider for [C]/[M] prefix rendering in both panes
+	drb.sourcePane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
+		return drb.clipboard.Active, drb.clipboard.FileInfo.Name, drb.clipboard.SourceDir, drb.clipboard.Operation
+	})
+	drb.targetPane.SetClipboardProvider(func() (bool, string, string, ClipboardOp) {
+		return drb.clipboard.Active, drb.clipboard.FileInfo.Name, drb.clipboard.SourceDir, drb.clipboard.Operation
+	})
 
 	drb.build()
 	return drb
@@ -143,6 +160,10 @@ func (drb *DualRemoteFileBrowser) build() {
 			screen.Sync()
 			return
 		}
+		if drb.transferModal != nil && drb.transferModal.IsVisible() {
+			screen.Sync()
+			return
+		}
 		_, _, width, height := drb.GetRect()
 		if height >= 1 && drb.statusBar != nil {
 			sy := height - 1
@@ -196,6 +217,9 @@ func (drb *DualRemoteFileBrowser) Draw(screen tcell.Screen) {
 	if drb.inputDialog != nil && drb.inputDialog.IsVisible() {
 		drb.inputDialog.Draw(screen)
 	}
+	if drb.transferModal != nil && drb.transferModal.IsVisible() {
+		drb.transferModal.Draw(screen)
+	}
 }
 
 // updateHeaderBar updates the header text with server alias, host, and port info.
@@ -220,7 +244,7 @@ func (drb *DualRemoteFileBrowser) formatHost(s domain.Server) string {
 
 // setStatusBarDefault sets the default status bar text with keyboard hints (D-10, D-09).
 func (drb *DualRemoteFileBrowser) setStatusBarDefault() {
-	drb.statusBar.SetText("[white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]S[-] Reverse  [white]Esc[-] Back")
+	drb.statusBar.SetText("[white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]F5[-] Transfer  [white]Tab[-] Switch  [white]d[-] Delete  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status for both servers to the status bar text (D-09).
@@ -244,14 +268,14 @@ func (drb *DualRemoteFileBrowser) updateStatusBarConnection() {
 		drb.sourceServer.Alias, sourceStatus,
 		drb.targetServer.Alias, targetStatus,
 		activeLabel,
-		"[white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]S[-] Reverse  [white]Esc[-] Back",
+		"[white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]F5[-] Transfer  [white]Tab[-] Switch  [white]d[-] Delete  [white]Esc[-] Back",
 	)
 	drb.statusBar.SetText(text)
 }
 
 // updateStatusBarTemp prepends a colored message before the default keyboard hints.
 func (drb *DualRemoteFileBrowser) updateStatusBarTemp(msg string) {
-	drb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]S[-] Reverse  [white]Esc[-] Back")
+	drb.statusBar.SetText(msg + "  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]F5[-] Transfer  [white]Tab[-] Switch  [white]d[-] Delete  [white]Esc[-] Back")
 }
 
 // currentSFTPService returns the SFTP service for the currently active pane.
@@ -392,5 +416,29 @@ func (drb *DualRemoteFileBrowser) reverseSort() {
 	pane := drb.currentPane()
 	mode := pane.GetSortMode().Reverse()
 	pane.SetSortMode(mode)
+}
+
+// paneForIdx returns the RemotePane for the given index (0=source, 1=target).
+func (drb *DualRemoteFileBrowser) paneForIdx(idx int) *RemotePane {
+	if idx == 0 {
+		return drb.sourcePane
+	}
+	return drb.targetPane
+}
+
+// sftpForIdx returns the SFTPService for the given index (0=source, 1=target).
+func (drb *DualRemoteFileBrowser) sftpForIdx(idx int) ports.SFTPService {
+	if idx == 0 {
+		return drb.sourceSFTP
+	}
+	return drb.targetSFTP
+}
+
+// aliasForIdx returns the server alias for the given index (0=source, 1=target).
+func (drb *DualRemoteFileBrowser) aliasForIdx(idx int) string {
+	if idx == 0 {
+		return drb.sourceServer.Alias
+	}
+	return drb.targetServer.Alias
 }
 
