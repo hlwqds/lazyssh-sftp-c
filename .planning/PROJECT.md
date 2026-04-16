@@ -4,23 +4,15 @@
 
 为 lazyssh（终端 SSH 管理器）添加内置的双栏文件传输和管理功能。用户在服务器列表中选中服务器后，按快捷键打开双栏文件浏览器（本地 vs 远程），支持上传/下载文件和目录、删除/重命名/新建/复制/移动文件操作，提供详细的传输进度显示。底层复用系统 SCP/SFTP 命令，保持 lazyssh "不引入新安全风险" 的原则。
 
+支持双远端文件互传：通过 T 键标记两个服务器，自动打开双远端文件浏览器，在两台远程服务器之间通过本地中继传输文件。
+
 ## Core Value
 
 在终端内完成 SSH 文件传输和文件管理，无需切换到 FileZilla 或记忆 scp 命令——选中服务器、选文件、操作，全部键盘驱动。
 
-## Current Milestone: v1.4 Dup Fix & Dual Remote Transfer
-
-**Goal:** 修复 Dup 行为 + 支持两个远端服务器之间的文件互传
-
-**Target features:**
-- Dup 修复：D 键复制后直接出现在列表，不自动打开表单
-- 双远端互传：T 键标记两个服务器，自动打开双远端文件浏览器
-- 双远端浏览器中支持复制/移动文件（复用 c/x + p 机制）
-
 ## Current State
 
 v1.4 shipped 2026-04-16 — Dup 修复 + 双远端文件互传功能完整。
-Phase 13 complete — 跨远端文件中继传输（RelayTransferService），c/x+p 剪贴板操作，F5 快速传输，两阶段进度显示，冲突处理，移动回滚。
 
 **已交付功能：**
 - 双栏文件浏览器（本地 vs 远程）
@@ -29,6 +21,8 @@ Phase 13 complete — 跨远端文件中继传输（RelayTransferService），c/
 - 文件冲突处理（覆盖/跳过/重命名）
 - 最近远程目录快速跳转
 - 文件管理操作：删除/重命名/新建目录/复制/移动/冲突对话框
+- 双远端文件浏览器（T 键标记 → 双远端 → Tab 切换 → c/x+p/F5 互传）
+- 跨远端中继传输（download A → temp → upload B，两阶段进度）
 
 ## Requirements
 
@@ -67,15 +61,15 @@ Phase 13 complete — 跨远端文件中继传输（RelayTransferService），c/
 - ✓ 文件/目录移动（x 标记 + p 粘贴，红色 [M] 前缀，copy+delete）— v1.2
 - ✓ 粘贴冲突对话框（覆盖/跳过/重命名，所有粘贴操作）— v1.2
 - ✓ Dup SSH 连接（D 键复制服务器配置，唯一别名，清除元数据）— v1.3
-
-### Validated
-
-- ✓ Dup 修复：D 键复制后直接保存并返回列表，移除 ServerForm 中间步骤 — v1.4, Phase 10
-- ✓ T 键标记服务器（源端 [S]/目标端 [T]），Esc 清除标记，同服务器防护 — v1.4, Phase 11
-- ✓ 双远端文件浏览器（左栏远端 A，右栏远端 B，并行 SFTP 连接，Tab 切换焦点）— v1.4, Phase 12
-
-- ✓ 双远端之间文件复制/移动（download A → temp → upload B，两阶段进度，冲突处理，移动回滚）— v1.4, Phase 13
+- ✓ Dup 修复：D 键复制后直接保存并返回列表，移除 ServerForm 中间步骤 — v1.4
+- ✓ T 键标记服务器（源端 [S]/目标端 [T]），Esc 清除标记，同服务器防护 — v1.4
+- ✓ 双远端文件浏览器（左栏远端 A，右栏远端 B，并行 SFTP 连接，Tab 切换焦点）— v1.4
+- ✓ 双远端之间文件复制/移动（download A → temp → upload B，两阶段进度，冲突处理，移动回滚）— v1.4
 - ✓ F 键仍保留本地+远端文件浏览器（现有行为不变）— v1.4
+
+### Active
+
+(No active requirements — all planned features shipped)
 
 ### Out of Scope
 
@@ -103,9 +97,11 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 - v1.1 (2026-04-14): 最近远程目录快速跳转 — MRU 记录 + 弹出列表 (2 phases, 3 plans)
 - v1.2 (2026-04-15): 文件管理操作 — 删除/重命名/新建/复制/移动/冲突对话框 (3 phases, 7 plans)
 - v1.3 (2026-04-15): Dup SSH 连接 — 服务器列表快速复制配置创建新条目 (1 phase, 1 plan)
-- v1.4 (2026-04-16): Dup 修复 + 双远端文件互传 (4 phases — Dup fix, T key marking, dual remote browser, cross-remote transfer)
+- v1.4 (2026-04-16): Dup 修复 + 双远端文件互传 — Dup fix, T key marking, dual remote browser, cross-remote transfer (4 phases, 5 plans)
 
 **技术栈：** Go 1.24.6, tview/tcell TUI, Cobra CLI, Zap logging, 系统 SSH/SFTP
+
+**代码规模：** ~8,000+ LOC Go (v1.0-v1.4 累计)
 
 ## Constraints
 
@@ -151,4 +147,4 @@ lazyssh 是一个 Go 编写的终端 SSH 管理器，采用 Clean Architecture +
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-16 — Phase 13 complete (v1.4 shipped)*
+*Last updated: 2026-04-16 — v1.4 milestone complete*

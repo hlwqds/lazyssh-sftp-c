@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.4 Dup Fix & Dual Remote Transfer (Shipped: 2026-04-16)
+
+**Phases completed:** 8 phases, 13 plans, 24 tasks
+
+**Key accomplishments:**
+
+- FileService interface extended with 5 file management methods (Remove/RemoveAll/Rename/Mkdir/Stat), implemented in both LocalFS and SFTPClient adapters with compile-time satisfaction checks
+- Two independent overlay components (ConfirmDialog + InputDialog) following established RecentDirs/TransferModal pattern, with InputField key routing via InputHandler() without tview focus system
+- Dual-pane file browser with delete (single/multi-select/recursive), rename with conflict detection, and mkdir with cursor positioning, all using ConfirmDialog/InputDialog overlays
+- Local Copy/CopyDir with permission+mtime preservation (D-07), remote CopyRemoteFile/CopyRemoteDir via download+re-upload (D-01)
+- Full clipboard copy/paste feature: c to mark files with green [C] prefix, p to paste locally (instant) or remotely (TransferModal modeCopy progress), Esc to clear clipboard without closing browser
+- Move marking UI with x key, [M] red prefix rendering, modeMove TransferModal, and extended clipboardProvider 4-tuple for operation-aware prefix display
+- handlePaste refactored with conflict dialog for all paste operations, move dispatch (OpMove), handleSameDirMove (atomic Rename), handleLocalMove (Copy+Delete+cleanup), and handleRemoteMove (modeMove progress + delete source + cleanup)
+- D key (Shift+d) server duplication with deep copy, unique -copy alias suffix, runtime metadata clearing, and post-save list auto-scroll
+- D key duplication simplified from 3-step (D -> form -> save) to 1-step (D -> done) with search-aware positioning and dead code removal
+- T key marking state machine with [S]/[T] visual prefix, Esc clear, same-server protection, and dual remote browser placeholder
+- Standalone DualRemoteFileBrowser component with two independent SFTP connections, 50:50 dual-pane layout, file operations (delete/rename/mkdir), and parallel connection establishment
+- RelayTransferService port+adapter composing two transfer.New() instances for cross-remote file relay, plus TransferModal modeCrossRemote for two-stage progress display
+- Cross-remote file copy/move via clipboard (c/x+p) and F5 quick transfer with two-stage relay progress, cancel, conflict handling, and move rollback
+
+---
+
 ## v1.3 Dup SSH Connection (Shipped: 2026-04-15)
 
 **Phases completed:** 4 phases, 8 plans, 14 tasks
