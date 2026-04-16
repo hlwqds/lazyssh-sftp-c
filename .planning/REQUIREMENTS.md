@@ -27,11 +27,11 @@
 
 ### Cross-Remote Transfer
 
-- [ ] **XFR-01**: 用户可以在双远端浏览器中通过 Enter/F5 触发跨远端文件传输（download A → temp → upload B）
-- [ ] **XFR-02**: 支持跨远端目录递归传输
-- [ ] **XFR-03**: 跨远端传输显示进度（复用 TransferModal，两阶段进度：下载进度 → 上传进度）
-- [ ] **XFR-04**: 跨远端传输支持取消（Esc），取消后清理本地临时文件
-- [ ] **XFR-05**: 跨远端文件冲突处理（覆盖/跳过/重命名，复用 ConfirmDialog）
+- [x] **XFR-01**: 用户可以在双远端浏览器中通过 Enter/F5 触发跨远端文件传输（download A → temp → upload B）
+- [x] **XFR-02**: 支持跨远端目录递归传输
+- [x] **XFR-03**: 跨远端传输显示进度（复用 TransferModal，两阶段进度：下载进度 → 上传进度）
+- [x] **XFR-04**: 跨远端传输支持取消（Esc），取消后清理本地临时文件
+- [x] **XFR-05**: 跨远端文件冲突处理（覆盖/跳过/重命名，复用 ConfirmDialog）
 - [ ] **XFR-06**: 支持跨远端复制（c 标记 + p 粘贴，绿色 [C] 前缀）
 - [ ] **XFR-07**: 支持跨远端移动（x 标记 + p 粘贴，红色 [M] 前缀，复制+删除源文件）
 
@@ -61,11 +61,11 @@
 | DRB-02 | Phase 12 | Complete |
 | DRB-03 | Phase 12 | Complete |
 | DRB-04 | Phase 12 | Complete |
-| XFR-01 | Phase 13 | Pending |
-| XFR-02 | Phase 13 | Pending |
-| XFR-03 | Phase 13 | Pending |
-| XFR-04 | Phase 13 | Pending |
-| XFR-05 | Phase 13 | Pending |
+| XFR-01 | Phase 13 | Complete |
+| XFR-02 | Phase 13 | Complete |
+| XFR-03 | Phase 13 | Complete |
+| XFR-04 | Phase 13 | Complete |
+| XFR-05 | Phase 13 | Complete |
 | XFR-06 | Phase 13 | Pending |
 | XFR-07 | Phase 13 | Pending |
 
