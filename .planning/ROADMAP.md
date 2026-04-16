@@ -204,10 +204,11 @@ Plans:
   3. 传输过程中 TransferModal 显示两阶段进度："Downloading from A..." 完成后重置为 "Uploading to B..."
   4. 传输过程中按 Esc 取消，本地临时文件和目标端部分文件被清理
   5. 目标文件已存在时弹出冲突对话框（覆盖/跳过/重命名），用户选择后继续或中止
-**Plans**: 1 plan
+**Plans**: 2 plans
 
 Plans:
-- [ ] 13-01-PLAN.md — 跨远端复制/移动（c/x + p）、两阶段进度、冲突处理、取消清理
+- [ ] 13-01-PLAN.md — RelayTransferService 端口+适配器 + TransferModal modeCrossRemote
+- [ ] 13-02-PLAN.md — DualRemoteFileBrowser 集成：clipboard (c/x/p) + F5 快捷传输 + 两阶段进度 + 冲突处理 + 取消回滚
 **UI hint**: yes
 
 ## Progress
@@ -229,4 +230,4 @@ Phases execute in numeric order: 10 -> 11 -> 12 -> 13
 | 10. Dup Fix | v1.4 | 1/1 | Complete    | 2026-04-15 |
 | 11. T Key Marking | v1.4 | 1/1 | Complete    | 2026-04-15 |
 | 12. Dual Remote Browser | v1.4 | 1/1 | Complete    | 2026-04-15 |
-| 13. Cross-Remote Transfer | v1.4 | 0/? | Not started | - |
+| 13. Cross-Remote Transfer | v1.4 | 0/2 | Not started | - |
