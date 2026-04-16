@@ -57,6 +57,7 @@ const (
 	modeSummary                         // Transfer complete/canceled summary (existing)
 	modeCopy                            // Phase 7: remote copy (download+re-upload) progress
 	modeMove                            // Phase 8: remote move (download+re-upload+delete) progress
+	modeCrossRemote                     // Phase 13: cross-remote relay transfer progress (two-stage)
 )
 
 // TransferModal is a full-screen overlay component that displays file transfer progress.
@@ -132,7 +133,7 @@ func (tm *TransferModal) Draw(screen tcell.Screen) {
 	x, y, width, height := tm.GetInnerRect()
 
 	switch tm.mode {
-	case modeProgress, modeCopy, modeMove:
+	case modeProgress, modeCopy, modeMove, modeCrossRemote:
 		tm.drawProgress(screen, x, y, width, height)
 	case modeCancelConfirm:
 		tm.drawCancelConfirm(screen, x, y, width, height)
@@ -257,6 +258,20 @@ func (tm *TransferModal) ShowMove(filename string) {
 	tm.bar = NewProgressBar()
 	tm.speedSamples = tm.speedSamples[:0]
 	tm.fileLabel = fmt.Sprintf("Moving: %s", filename)
+	tm.infoLine = ""
+	tm.etaLine = ""
+}
+
+// ShowCrossRemote displays the modal in cross-remote mode for relay transfer progress (D-02).
+// sourceAlias and targetAlias are used to differentiate the two-stage labels.
+func (tm *TransferModal) ShowCrossRemote(sourceAlias, targetAlias, filename string) {
+	tm.visible = true
+	tm.mode = modeCrossRemote
+	tm.cancelConfirmed = false
+	tm.SetTitle(fmt.Sprintf(" Transfer: %s ", filename))
+	tm.bar = NewProgressBar()
+	tm.speedSamples = tm.speedSamples[:0]
+	tm.fileLabel = fmt.Sprintf("Downloading from %s: %s", sourceAlias, filename)
 	tm.infoLine = ""
 	tm.etaLine = ""
 }
@@ -450,7 +465,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		tm.Hide()
 		return nil
 
-	case modeProgress, modeCopy, modeMove:
+	case modeProgress, modeCopy, modeMove, modeCrossRemote:
 		switch event.Key() { //nolint:exhaustive // keyboard handler: intentionally handles only specific keys
 		case tcell.KeyEscape:
 			tm.ShowCancelConfirm()
@@ -466,7 +481,7 @@ func (tm *TransferModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 // The caller is responsible for wrapping calls in app.QueueUpdateDraw().
 // No-op if not in progress mode.
 func (tm *TransferModal) Update(p domain.TransferProgress) {
-	if tm.mode != modeProgress && tm.mode != modeCopy && tm.mode != modeMove {
+	if tm.mode != modeProgress && tm.mode != modeCopy && tm.mode != modeMove && tm.mode != modeCrossRemote {
 		return
 	}
 
