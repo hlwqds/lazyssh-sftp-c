@@ -157,6 +157,49 @@
 
 ---
 
+## Milestone: v1.4 — Dup Fix & Dual Remote Transfer
+
+**Shipped:** 2026-04-16
+**Phases:** 4 | **Plans:** 5 | **Tasks:** ~13
+
+### What Was Built
+- Dup 修复：D 键从 3 步简化为 1 步直接保存，移除 ServerForm 中间步骤
+- T 键标记状态机：源端 [S]/目标端 [T] 视觉前缀，Esc 清除，同服务器防护
+- DualRemoteFileBrowser 独立组件：双 SFTP 并行连接，50:50 布局，文件操作
+- RelayTransferService 端口+适配器：download→temp→upload 中继模式
+- TransferModal modeCrossRemote：两阶段进度显示（下载→上传阶段切换）
+- 跨远端剪贴板 c/x+p + F5 快速传输，冲突处理，移动回滚
+
+### What Worked
+- 独立组件策略（DualRemoteFileBrowser不复用FileBrowser）避免了15+ activePane二元假设
+- 两个独立 SFTPClient 实例实现了真正的并行连接，错误隔离
+- RelayTransferService 组合两个 transfer.New() 实例，零代码重复
+- modeCrossRemote 复用 TransferModal 现有渲染，dlDone 标志切换阶段
+- RESEARCH.md 的 D-01~D-05 pitfall 分析在执行前就预见了关键设计陷阱
+
+### What Was Inefficient
+- Plan 13-02 中 relaySvc 字段类型指定了不存在的导出类型（auto-fixed during execution）
+- executeF5Transfer 中 srcSFTP 未使用变量（auto-fixed during execution）
+- cmd.Stderr 重定向问题在 Phase 12 研究时就已识别但未在执行中验证
+
+### Patterns Established
+- 独立组件优于复用复杂组件（DualRemoteFileBrowser vs 扩展 FileBrowser）
+- 中继传输模式：download(src, temp) → upload(temp, dst) + defer cleanup
+- 两阶段进度回调：combinedProgress + dlDone bool 阶段检测
+- 移动回滚模式：源删除失败→尝试清理目标→显示手动清理消息
+
+### Key Lessons
+1. 计划中引用不存在的导出类型会导致执行时 auto-fix——研究阶段应验证类型可访问性
+2. 中继传输的临时文件清理必须在所有代码路径（成功/取消/错误）上用 defer 保证
+3. 双远端场景中 clipboardProvider 需要在两个面板上都注册，而非仅在一个面板上
+
+### Cost Observations
+- Model mix: sonnet (executor), opus (orchestrator/verifier)
+- Sessions: ~2 (Phase 10-11 + Phase 12-13 split)
+- Notable: 4-phase milestone completed in ~1 day, 2 auto-fixed bugs in final plan
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -167,6 +210,7 @@
 | v1.1 | 1 | 2 | Small focused milestone, overlay pattern reuse |
 | v1.2 | 2 | 3 | Heavy interface extension, file operations |
 | v1.3 | 1 | 1 | Minimal milestone, clean architecture payoff |
+| v1.4 | ~2 | 4 | Dup fix + dual remote transfer, relay pattern |
 
 ### Cumulative Quality
 
@@ -176,6 +220,7 @@
 | v1.1 | 28 | +5 tests, TransferModal.Draw() bug fix |
 | v1.2 | ~35 | +7 tests, FileService unified interface |
 | v1.3 | ~35 | Zero deviations, 2min execution |
+| v1.4 | ~35 | +1532 LOC, relay pattern, 2 auto-fixed bugs |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -185,3 +230,5 @@
 4. Extending Go interfaces requires updating ALL implementations including test mocks
 5. Clean architecture makes single-plan milestones trivial when reusing existing components
 6. Small, well-scoped milestones reduce friction to near-zero
+7. Independent components beat extending complex ones when activePane assumptions differ (v1.4)
+8. Relay transfer pattern (download→temp→upload) enables cross-server operations without server-to-server SSH
