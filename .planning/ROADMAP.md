@@ -208,7 +208,7 @@ Plans:
 
 Plans:
 - [x] 13-01-PLAN.md — RelayTransferService 端口+适配器 + TransferModal modeCrossRemote
-- [ ] 13-02-PLAN.md — DualRemoteFileBrowser 集成：clipboard (c/x/p) + F5 快捷传输 + 两阶段进度 + 冲突处理 + 取消回滚
+- [x] 13-02-PLAN.md — DualRemoteFileBrowser 集成：clipboard (c/x/p) + F5 快捷传输 + 两阶段进度 + 冲突处理 + 取消回滚
 **UI hint**: yes
 
 ## Progress
@@ -230,4 +230,4 @@ Phases execute in numeric order: 10 -> 11 -> 12 -> 13
 | 10. Dup Fix | v1.4 | 1/1 | Complete    | 2026-04-15 |
 | 11. T Key Marking | v1.4 | 1/1 | Complete    | 2026-04-15 |
 | 12. Dual Remote Browser | v1.4 | 1/1 | Complete    | 2026-04-15 |
-| 13. Cross-Remote Transfer | v1.4 | 1/2 | In Progress|  |
+| 13. Cross-Remote Transfer | v1.4 | 2/2 | Complete   | 2026-04-16 |
