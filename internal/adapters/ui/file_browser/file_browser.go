@@ -282,12 +282,12 @@ func (fb *FileBrowser) Draw(screen tcell.Screen) {
 
 // setStatusBarDefault sets the default status bar text with keyboard hints.
 func (fb *FileBrowser) setStatusBarDefault() {
-	fb.statusBar.SetText("[white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText("[white]Tab[-] Switch  [white]Space[-] Select  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]r[-] Recent  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // updateStatusBarConnection prepends connection status to the status bar text.
 func (fb *FileBrowser) updateStatusBarConnection(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]Space[-] Select  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]r[-] Recent  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // GetLocalPane returns the local file pane.
@@ -557,7 +557,7 @@ func (fb *FileBrowser) initiateDirTransfer() {
 
 // updateStatusBarTemp sets a temporary status bar message with keyboard hints.
 func (fb *FileBrowser) updateStatusBarTemp(msg string) {
-	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
+	fb.statusBar.SetText(msg + "  [white]Tab[-] Switch  [white]Space[-] Select  [white]c[-] Copy  [white]x[-] Move  [white]p[-] Paste  [white]d[-] Delete  [white]R[-] Rename  [white]m[-] Mkdir  [white]r[-] Recent  [white]s[-] Sort  [white]F5[-] Transfer  [white]Esc[-] Back")
 }
 
 // buildConflictHandler creates the onConflict callback for file transfers.
